@@ -199,10 +199,11 @@
   button.act{
     border:none;
     border-radius:8px;
-    padding:6px 14px;
+    padding:6px 16px;
     font-size:.85rem;
     font-weight:600;
     cursor:pointer;
+    flex:1;
   }
   button.copy{background:var(--ink);color:white;}
   button.save{background:var(--n5);color:white;}
@@ -824,6 +825,7 @@ document.querySelectorAll('.flag').forEach(flag => {
     if(flag.classList.contains('on')){
       scrollTextareaToText(document.getElementById('output'), flag.dataset.text);
     }
+    scrollFlagToFixedPosition(flag);
   });
 });
 
@@ -1308,6 +1310,24 @@ function scrollTextareaToText(textarea, searchText){
   const maxScroll = Math.max(0, textarea.scrollHeight - textarea.clientHeight);
   const target = markerTop - (textarea.clientHeight / 2) + (markerHeight / 2);
   textarea.scrollTop = Math.max(0, Math.min(target, maxScroll));
+}
+
+// Scorre il form in modo che il flag appena cliccato si porti sempre alla stessa altezza
+// fissa dalla cima della pagina (o della colonna del form su desktop), creando un effetto
+// di scorrimento automatico via via che si compila la consegna dall'alto verso il basso.
+const FLAG_SCROLL_OFFSET = 120;
+function scrollFlagToFixedPosition(flag){
+  const mainEl = document.querySelector('main');
+  const isContainerScroll = getComputedStyle(mainEl).overflowY === 'auto' || getComputedStyle(mainEl).overflowY === 'scroll';
+  const rect = flag.getBoundingClientRect();
+  if(isContainerScroll){
+    const mainRect = mainEl.getBoundingClientRect();
+    const delta = (rect.top - mainRect.top) - FLAG_SCROLL_OFFSET;
+    mainEl.scrollBy({ top: delta, behavior: 'smooth' });
+  } else {
+    const delta = rect.top - FLAG_SCROLL_OFFSET;
+    window.scrollBy({ top: delta, behavior: 'smooth' });
+  }
 }
 
 function resetAll(){
