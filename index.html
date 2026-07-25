@@ -897,7 +897,12 @@ document.querySelectorAll('.flag').forEach(flag => {
     manualEdit = false;
     highlightSource = groupName;
     render();
-    scrollFlagToFixedPosition(group);
+    // Si ancora al ".group" più esterno (non al gruppo/sotto-pannello più vicino usato per
+    // la logica di stato): categorie come Emodinamica o Diuresi hanno più contenitori
+    // annidati (riga principale dei chip + pannelli secondari rivelati alla selezione), e
+    // ancorarsi al più vicino faceva saltare lo scroll tra questi ad ogni click, anche
+    // restando nella stessa categoria.
+    scrollFlagToFixedPosition(flag.closest('.group') || group);
   });
 });
 
