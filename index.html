@@ -1336,16 +1336,32 @@ function clearOutputHighlight(){
   lastHighlightRects = [];
 }
 
-// Trova il tratto cambiato tra due stringhe confrontando prefisso e suffisso comuni.
+// Spezza il testo in parole (lettere accentate incluse) e "resto" (spazi, punteggiatura),
+// alternati, così il confronto avviene per parola intera e non per singolo carattere.
+function tokenizeWords(str){
+  return str.match(/[A-Za-zÀ-ÖØ-öø-ÿ]+|[^A-Za-zÀ-ÖØ-öø-ÿ]+/g) || [];
+}
+
+// Trova il tratto cambiato tra due stringhe confrontando prefisso e suffisso comuni,
+// a livello di parola intera (non di singolo carattere) e ignorando le differenze di sola
+// maiuscola/minuscola: altrimenti "Negativo"->"Positivo" evidenzierebbe solo "Posi" (unica
+// parte diversa carattere per carattere) invece dell'intera parola, e un cambio di
+// capitalizzazione dovuto solo a un riordino di frase verrebbe evidenziato a torto.
 function trimCommonEnds(oldSeg, newSeg){
+  const oldTokens = tokenizeWords(oldSeg);
+  const newTokens = tokenizeWords(newSeg);
   let start = 0;
-  const maxStart = Math.min(oldSeg.length, newSeg.length);
-  while(start < maxStart && oldSeg[start] === newSeg[start]) start++;
-  let oldEnd = oldSeg.length, newEnd = newSeg.length;
-  while(oldEnd > start && newEnd > start && oldSeg[oldEnd - 1] === newSeg[newEnd - 1]){
+  const maxStart = Math.min(oldTokens.length, newTokens.length);
+  while(start < maxStart && oldTokens[start].toLowerCase() === newTokens[start].toLowerCase()) start++;
+  let oldEnd = oldTokens.length, newEnd = newTokens.length;
+  while(oldEnd > start && newEnd > start && oldTokens[oldEnd - 1].toLowerCase() === newTokens[newEnd - 1].toLowerCase()){
     oldEnd--; newEnd--;
   }
-  return { start, end: newEnd, removedLength: oldEnd - start };
+  const charStart = newTokens.slice(0, start).join('').length;
+  const charEnd = newTokens.slice(0, newEnd).join('').length;
+  const oldCharStart = oldTokens.slice(0, start).join('').length;
+  const oldCharEnd = oldTokens.slice(0, oldEnd).join('').length;
+  return { start: charStart, end: charEnd, removedLength: oldCharEnd - oldCharStart };
 }
 
 // Confronta prima riga per riga (uguaglianza esatta, senza falsi positivi da singoli
