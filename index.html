@@ -687,7 +687,7 @@
     <h2><span class="badge">6</span>Attività di turno</h2>
 
     <div class="group" data-group="T-medicazione-dispositivi" data-mode="checkbox">
-      <div class="group-label">Medicazione dispositivi eseguita</div>
+      <div class="group-label">Medicazione dispositivi</div>
       <div class="flags">
         <span class="flag" data-text="CVC">CVC</span>
         <span class="flag" data-text="linea arteriosa">Arterioso</span>
@@ -697,7 +697,7 @@
     </div>
 
     <div class="group" data-group="T-esami" data-mode="checkbox">
-      <div class="group-label">Esami eseguiti</div>
+      <div class="group-label">Esami</div>
       <div class="flags">
         <span class="flag" data-text="eseguiti prelievi ematici">Prelievi ematici</span>
         <span class="flag" data-text="eseguita emogasanalisi di controllo">Emogasanalisi di controllo</span>
@@ -709,7 +709,7 @@
     </div>
 
     <div class="group" data-group="T-assistenza" data-mode="checkbox">
-      <div class="group-label">Assistenza eseguita</div>
+      <div class="group-label">Assistenza</div>
       <div class="flags">
         <span class="flag" data-text="eseguita igiene a letto">Igiene a letto</span>
         <span class="flag" data-text="posturato">Paziente posturato</span>
@@ -821,6 +821,9 @@ document.querySelectorAll('.flag').forEach(flag => {
 
     manualEdit = false;
     render();
+    if(flag.classList.contains('on')){
+      scrollTextareaToText(document.getElementById('output'), flag.dataset.text);
+    }
   });
 });
 
@@ -1241,13 +1244,71 @@ function toggleOutput(){
 
 // Su mobile, quando si apre la tastiera per compilare un campo, richiudi il riquadro
 // della consegna generata così restano visibili i flag e il campo che si sta compilando.
+// Quando la tastiera si chiude (nessun altro campo ha il focus), il riquadro si riapre
+// da solo, ma solo se era stato chiuso automaticamente per fare spazio alla tastiera.
+let outputAutoCollapsed = false;
 document.querySelectorAll('input, select').forEach(el => {
   el.addEventListener('focus', () => {
-    document.getElementById('output-wrap').classList.add('collapsed');
+    const wrap = document.getElementById('output-wrap');
+    if(!wrap.classList.contains('collapsed')) outputAutoCollapsed = true;
+    wrap.classList.add('collapsed');
     const btn = document.getElementById('toggle-btn');
     if(btn) btn.textContent = 'Mostra ▲';
   });
+  el.addEventListener('blur', () => {
+    setTimeout(() => {
+      const active = document.activeElement;
+      const stillEditing = active && (active.tagName === 'INPUT' || active.tagName === 'SELECT');
+      if(!stillEditing && outputAutoCollapsed){
+        const wrap = document.getElementById('output-wrap');
+        wrap.classList.remove('collapsed');
+        const btn = document.getElementById('toggle-btn');
+        if(btn) btn.textContent = 'Nascondi ▼';
+        outputAutoCollapsed = false;
+      }
+    }, 150);
+  });
 });
+
+// Scorre la textarea della consegna generata fino al testo del flag appena selezionato,
+// centrandolo in verticale; se non lo trova (es. testo cambiato dalla concordanza di
+// genere) scorre semplicemente in fondo, dove di norma si trova il contenuto più recente.
+function scrollTextareaToText(textarea, searchText){
+  if(textarea.clientHeight === 0) return;
+  const value = textarea.value;
+  let idx = searchText ? value.indexOf(searchText) : -1;
+  if(idx === -1 && searchText) idx = value.toLowerCase().indexOf(searchText.toLowerCase());
+  if(idx === -1){
+    textarea.scrollTop = textarea.scrollHeight;
+    return;
+  }
+  const mirror = document.createElement('div');
+  const cs = getComputedStyle(textarea);
+  ['fontFamily','fontSize','fontWeight','fontStyle','lineHeight','letterSpacing','padding','borderWidth','boxSizing','wordBreak'].forEach(p => { mirror.style[p] = cs[p]; });
+  mirror.style.whiteSpace = 'pre-wrap';
+  mirror.style.wordWrap = 'break-word';
+  mirror.style.position = 'absolute';
+  mirror.style.visibility = 'hidden';
+  mirror.style.height = 'auto';
+  mirror.style.width = textarea.clientWidth + 'px';
+  mirror.style.left = '-9999px';
+  mirror.style.top = '0';
+  document.body.appendChild(mirror);
+
+  mirror.appendChild(document.createTextNode(value.slice(0, idx)));
+  const marker = document.createElement('span');
+  marker.textContent = value.slice(idx, idx + Math.max(searchText.length, 1)) || '​';
+  mirror.appendChild(marker);
+  mirror.appendChild(document.createTextNode(value.slice(idx + marker.textContent.length)));
+
+  const markerTop = marker.offsetTop;
+  const markerHeight = marker.offsetHeight || parseFloat(cs.lineHeight) || 20;
+  document.body.removeChild(mirror);
+
+  const maxScroll = Math.max(0, textarea.scrollHeight - textarea.clientHeight);
+  const target = markerTop - (textarea.clientHeight / 2) + (markerHeight / 2);
+  textarea.scrollTop = Math.max(0, Math.min(target, maxScroll));
+}
 
 function resetAll(){
   document.querySelectorAll('.flag').forEach(f => f.classList.remove('on'));
