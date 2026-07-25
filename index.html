@@ -1044,8 +1044,6 @@ function updateVentParamsVisibility(){
 }
 
 function render(){
-  if(manualEdit) return;
-
   const lines = [];
 
   // 1 - Neurologico
@@ -1338,7 +1336,42 @@ function render(){
 
   finalLines = finalLines.map(l => capitalizeSentences(l));
 
-  applyRenderedText(finalLines.join('\n'));
+  const markedFull = finalLines.join('\n');
+  if(manualEdit){
+    // Il testo è stato modificato a mano: non lo sovrascriviamo (perderebbe le modifiche),
+    // ma aggiungiamo comunque in coda solo il tratto del flag/campo appena toccato, così i
+    // chip restano utilizzabili anche dopo un'edit manuale invece di smettere di fare nulla.
+    appendMarkedSnippet(markedFull);
+  } else {
+    applyRenderedText(markedFull);
+  }
+}
+
+// Estrae solo il tratto marcato (l'ultimo flag/campo appena modificato) e lo aggiunge in
+// fondo al testo attuale della textarea, invece di sostituirlo: usato quando l'utente ha
+// già modificato la consegna a mano, per non perdere quelle modifiche.
+function appendMarkedSnippet(markedText){
+  const idxA = markedText.indexOf(MARK_START);
+  if(idxA === -1) return; // nessuna aggiunta (es. una deselezione): niente da accodare
+  const idxB = markedText.indexOf(MARK_END, idxA);
+  if(idxB === -1 || idxB - 1 <= idxA) return;
+  let snippet = markedText.slice(idxA + 1, idxB);
+  // Il frammento viene da dentro una frase costruita per un contesto diverso (a volte a
+  // metà periodo, minuscolo, senza punto): qui è invece un'aggiunta a sé, quindi la
+  // trattiamo come una nuova riga a parte, con iniziale maiuscola e punto finale.
+  snippet = snippet.charAt(0).toUpperCase() + snippet.slice(1);
+  if(!/[.!?]$/.test(snippet)) snippet += '.';
+  const textarea = document.getElementById('output');
+  const current = textarea.value;
+  const sep = current && !current.endsWith('\n') ? '\n' : '';
+  const start = current.length + sep.length;
+  textarea.value = current + sep + snippet;
+  const end = start + snippet.length;
+  if(textarea.clientHeight === 0){
+    currentHighlightRange = { start, end };
+  } else {
+    scrollAndHighlightRange(textarea, start, end);
+  }
 }
 
 // Estrae dal testo marcato l'intervallo esatto (se presente) corrispondente all'ultimo
