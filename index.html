@@ -1655,7 +1655,7 @@ function resetAll(){
   document.querySelectorAll('.flag').forEach(f => f.classList.remove('on'));
   document.querySelectorAll('.sub-flags').forEach(s => s.classList.remove('show'));
   document.querySelectorAll('.params-box').forEach(p => p.classList.remove('show'));
-  document.querySelectorAll('input[type=number], input[type=text]').forEach(i => i.value = '');
+  document.querySelectorAll('input[type=number], input[type=text], input[type=search]').forEach(i => i.value = '');
   for(const k in state) state[k] = [];
   manualSections = {};
   lastRenderedPieces = [];
@@ -1684,7 +1684,10 @@ async function saveConsegna(){
   const sesso = (state['sesso'] && state['sesso'][0]) || '';
   const { error } = await sb.from('consegne_turno').insert({
     letto, testo, eta, sesso,
-    stato: JSON.parse(JSON.stringify(state)),
+    // "groups" sono i flag selezionati; manualSections/extraTrailingText sono le sezioni
+    // modificate a mano, che altrimenti andrebbero perse ricaricando la consegna (senza
+    // di loro il caricamento rigenera tutto da zero dai soli flag, ignorando le modifiche).
+    stato: JSON.parse(JSON.stringify({ groups: state, manualSections, extraTrailingText })),
     inputs: collectInputs()
   });
   if(!error){
@@ -1700,7 +1703,7 @@ async function saveConsegna(){
 
 function collectInputs(){
   const obj = {};
-  document.querySelectorAll('input[type=number], input[type=text]').forEach(i => {
+  document.querySelectorAll('input[type=number], input[type=text], input[type=search]').forEach(i => {
     if(i.id) obj[i.id] = i.value;
   });
   return obj;
@@ -1711,7 +1714,7 @@ function applyState(savedState, savedInputs){
   document.querySelectorAll('.flag').forEach(f => f.classList.remove('on'));
   document.querySelectorAll('.sub-flags').forEach(s => s.classList.remove('show'));
   document.querySelectorAll('.params-box').forEach(p => p.classList.remove('show'));
-  document.querySelectorAll('input[type=number], input[type=text]').forEach(i => i.value = '');
+  document.querySelectorAll('input[type=number], input[type=text], input[type=search]').forEach(i => i.value = '');
   for(const k in state) state[k] = [];
 
   // restore state object
@@ -1786,7 +1789,13 @@ async function loadConsegna(id){
   lastRenderedPieces = [];
   extraTrailingText = '';
   if(item.stato && Object.keys(item.stato).length){
-    applyState(item.stato, item.inputs);
+    // formato nuovo: { groups, manualSections, extraTrailingText }. Formato vecchio
+    // (consegne salvate prima di questa modifica): item.stato è direttamente i "groups",
+    // senza sezioni congelate salvate (si comporta come prima, tutto automatico).
+    const savedGroups = item.stato.groups || item.stato;
+    applyState(savedGroups, item.inputs);
+    manualSections = item.stato.manualSections ? JSON.parse(JSON.stringify(item.stato.manualSections)) : {};
+    extraTrailingText = item.stato.extraTrailingText || '';
     render();
   } else {
     const testo = item.testo || '';
