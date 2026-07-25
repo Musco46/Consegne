@@ -794,7 +794,26 @@ const sb = window.supabase.createClient(
 );
 
 const state = {};
-let manualEdit = false;
+
+// La consegna è divisa in 6 sezioni di testo indipendenti, sempre nello stesso ordine
+// fisso. Se una sezione viene modificata a mano, resta "congelata" com'è (manualSections)
+// finché non si clicca un chip di QUELLA sezione (che la scongela e la fa tornare
+// automatica): le altre sezioni continuano ad aggiornarsi normalmente nel frattempo.
+const SECTION_ORDER = ['neuro', 'vent', 'circolo', 'diuresi', 'drenaggi', 'attivita'];
+let manualSections = {};      // chiave sezione -> testo congelato
+let lastRenderedPieces = [];  // [{key, text}] righe attualmente mostrate, in ordine
+let extraTrailingText = '';   // eventuale testo extra scritto a mano oltre le righe note
+
+function sectionKeyForGroup(name){
+  if(!name) return null;
+  if(name.startsWith('N-') || name === 'eta-val') return 'neuro';
+  if(name.startsWith('V-') || ['fio2-val','peep-val','sopra-peep-val','flusso-val','atti-val','o2-lmin-val','modalita-val'].includes(name)) return 'vent';
+  if(name.startsWith('C-') || name === 'temp-val') return 'circolo';
+  if(name.startsWith('U-') || name === 'ristagno-qta-val') return 'diuresi';
+  if(name.startsWith('AC-') || ['tor-asp-val','tor-qta-val','add-asp-val','add-qta-val','cra-asp-val','cra-qta-val','alt-asp-val','alt-qta-val','altro-sede-val'].includes(name)) return 'drenaggi';
+  if(name.startsWith('T-')) return 'attivita';
+  return null;
+}
 
 // Niente barra AutoFill (contatti/password) sopra la tastiera. Il trucco è type="search":
 // quei campi non attivano l'AutoFill. type="number" invece lo attiva comunque su Android/
@@ -898,6 +917,7 @@ document.querySelectorAll('.flag').forEach(flag => {
     }
 
     highlightSource = groupName;
+    delete manualSections[sectionKeyForGroup(groupName)];
     render();
     // Si ancora al ".group" più esterno (non al gruppo/sotto-pannello più vicino usato per
     // la logica di stato): categorie come Emodinamica o Diuresi hanno più contenitori
@@ -914,6 +934,7 @@ document.querySelectorAll('.flag').forEach(flag => {
   const el = document.getElementById(id);
   if(el) el.addEventListener('input', () => {
     highlightSource = id;
+    delete manualSections[sectionKeyForGroup(id)];
     render();
   });
 });
@@ -1059,7 +1080,7 @@ function render(){
   if(state['N-reattivita'] && state['N-reattivita'][0]) nParts.push(mark(sourceMatches('N-reattivita'), state['N-reattivita'][0]));
   if(state['N-agitazione'] && state['N-agitazione'][0]) nParts.push(mark(sourceMatches('N-agitazione'), state['N-agitazione'][0]));
   if(state['N-consolabilita'] && state['N-consolabilita'][0]) nParts.push(mark(sourceMatches('N-consolabilita'), state['N-consolabilita'][0]));
-  if(nParts.length) lines.push(capitalize(joinPhrases(nParts, ', ')) + '.');
+  if(nParts.length) lines.push({ key: 'neuro', text: capitalize(joinPhrases(nParts, ', ')) + '.' });
 
   // 2 - Ventilazione
   let vParts = [];
@@ -1143,7 +1164,7 @@ function render(){
     vParts.push(mark(sourceMatches('V-scialorrea'), 'presenta abbondante scialorrea'));
   }
 
-  if(vParts.length) lines.push(capitalize(joinPhrases(vParts, '. ')) + '.');
+  if(vParts.length) lines.push({ key: 'vent', text: capitalize(joinPhrases(vParts, '. ')) + '.' });
 
   // 3 - Circolo
   let cParts = [];
@@ -1168,7 +1189,7 @@ function render(){
   } else if(tempVal){
     cParts.push(mark(sourceMatches('C-temp', 'temp-val'), `TC ${tempVal}°C`));
   }
-  if(cParts.length) lines.push(capitalize(joinPhrases(cParts, '. ')) + '.');
+  if(cParts.length) lines.push({ key: 'circolo', text: capitalize(joinPhrases(cParts, '. ')) + '.' });
 
   // 4 - Diuresi, alimentazione, alvo
   let uParts = [];
@@ -1258,7 +1279,7 @@ function render(){
     uParts.push(mark(sourceMatches('U-alvo', 'U-feci-sel'), feciBits.length ? `${uAlvo}, ${joinPhrases(feciBits)}` : uAlvo));
   }
 
-  if(uParts.length) lines.push(capitalize(joinPhrases(uParts, '. ')) + '.');
+  if(uParts.length) lines.push({ key: 'diuresi', text: capitalize(joinPhrases(uParts, '. ')) + '.' });
 
   // 5 - Drenaggi (each selected drain has its own independent detail)
   let acParts = [];
@@ -1310,7 +1331,7 @@ function render(){
     }
   });
 
-  if(acParts.length) lines.push(capitalize(acParts.map(p => p + '.').join(' ')));
+  if(acParts.length) lines.push({ key: 'drenaggi', text: capitalize(acParts.map(p => p + '.').join(' ')) });
 
   // 6 - Attività di turno
   let tParts = [];
@@ -1333,61 +1354,52 @@ function render(){
 
   if(tParts.length){
     const sentence = tParts.map(t => capitalize(t) + '.').join(' ');
-    lines.push(sentence);
+    lines.push({ key: 'attivita', text: sentence });
   }
 
   const sesso = state['sesso'] && state['sesso'][0];
   const etaVal = document.getElementById('eta-val').value;
 
-  let finalLines = sesso === 'F' ? lines.map(l => feminizeText(l)) : lines.slice();
+  let finalLines = sesso === 'F'
+    ? lines.map(l => ({ key: l.key, text: feminizeText(l.text) }))
+    : lines.map(l => ({ key: l.key, text: l.text }));
 
   const openWord = ageOpeningWord(etaVal, sesso);
   if(openWord){
     const markedOpenWord = mark(sourceMatches('eta-val'), openWord);
-    if(nParts.length && finalLines.length){
-      finalLines[0] = markedOpenWord + ' ' + lowerFirstReal(finalLines[0]);
+    if(nParts.length && finalLines.length && finalLines[0].key === 'neuro'){
+      finalLines[0].text = markedOpenWord + ' ' + lowerFirstReal(finalLines[0].text);
     } else {
-      finalLines.unshift(markedOpenWord + '.');
+      finalLines.unshift({ key: 'neuro', text: markedOpenWord + '.' });
     }
   }
 
-  finalLines = finalLines.map(l => capitalizeSentences(l));
+  finalLines = finalLines.map(l => ({ key: l.key, text: capitalizeSentences(l.text) }));
 
-  const markedFull = finalLines.join('\n');
-  if(manualEdit){
-    // Il testo è stato modificato a mano: non lo sovrascriviamo (perderebbe le modifiche),
-    // ma aggiungiamo comunque in coda solo il tratto del flag/campo appena toccato, così i
-    // chip restano utilizzabili anche dopo un'edit manuale invece di smettere di fare nulla.
-    appendMarkedSnippet(markedFull);
-  } else {
-    applyRenderedText(markedFull);
-  }
-}
+  // Assembla l'output rispettando l'ordine fisso delle sezioni: una sezione congelata a
+  // mano resta quella (anche se lo stato che l'aveva generata è nel frattempo svuotato),
+  // le altre usano la versione appena calcolata dallo stato.
+  const autoByKey = {};
+  finalLines.forEach(p => { autoByKey[p.key] = p.text; });
 
-// Estrae solo il tratto marcato (l'ultimo flag/campo appena modificato) e lo aggiunge in
-// fondo al testo attuale della textarea, invece di sostituirlo: usato quando l'utente ha
-// già modificato la consegna a mano, per non perdere quelle modifiche.
-function appendMarkedSnippet(markedText){
-  const idxA = markedText.indexOf(MARK_START);
-  if(idxA === -1) return; // nessuna aggiunta (es. una deselezione): niente da accodare
-  const idxB = markedText.indexOf(MARK_END, idxA);
-  if(idxB === -1 || idxB - 1 <= idxA) return;
-  let snippet = markedText.slice(idxA + 1, idxB);
-  // Il frammento viene da dentro una frase costruita per un contesto diverso (a volte a
-  // metà periodo, minuscolo, senza punto): qui è invece un'aggiunta a sé, quindi la
-  // trattiamo come una nuova riga a parte, con iniziale maiuscola e punto finale.
-  snippet = snippet.charAt(0).toUpperCase() + snippet.slice(1);
-  if(!/[.!?]$/.test(snippet)) snippet += '.';
-  const textarea = document.getElementById('output');
-  const current = textarea.value;
-  const sep = current && !current.endsWith('\n') ? '\n' : '';
-  const start = current.length + sep.length;
-  textarea.value = current + sep + snippet;
-  const end = start + snippet.length;
-  if(textarea.clientHeight === 0){
-    currentHighlightRange = { start, end };
-  } else {
-    scrollAndHighlightRange(textarea, start, end);
+  const outputPieces = [];
+  SECTION_ORDER.forEach(key => {
+    if(Object.prototype.hasOwnProperty.call(manualSections, key)){
+      if(manualSections[key]) outputPieces.push({ key, text: manualSections[key] });
+    } else if(autoByKey[key]){
+      outputPieces.push({ key, text: autoByKey[key] });
+    }
+  });
+
+  let markedFull = outputPieces.map(p => p.text).join('\n');
+  applyRenderedText(markedFull);
+
+  lastRenderedPieces = outputPieces.map(p => ({
+    key: p.key,
+    text: p.text.split(MARK_START).join('').split(MARK_END).join('')
+  }));
+  if(extraTrailingText){
+    extraTrailingText.split('\n').forEach((t, i) => lastRenderedPieces.push({ key: '_extra' + i, text: t }));
   }
 }
 
@@ -1425,7 +1437,31 @@ function applyRenderedText(markedText){
   scrollAndHighlightRange(textarea, range.start, range.end);
 }
 
-document.getElementById('output').addEventListener('input', () => { manualEdit = true; clearOutputHighlight(); });
+// Quando l'utente scrive a mano nella consegna, capiamo QUALE riga (sezione) ha toccato
+// confrontando posizione per posizione con l'ultimo testo mostrato: solo quella sezione
+// viene congelata, le altre continuano ad aggiornarsi automaticamente con i chip.
+document.getElementById('output').addEventListener('input', () => {
+  const textarea = document.getElementById('output');
+  const currentLines = textarea.value.split('\n');
+  const knownCount = lastRenderedPieces.length;
+  for(let i = 0; i < Math.min(knownCount, currentLines.length); i++){
+    if(currentLines[i] !== lastRenderedPieces[i].text){
+      if(SECTION_ORDER.includes(lastRenderedPieces[i].key)) manualSections[lastRenderedPieces[i].key] = currentLines[i];
+      lastRenderedPieces[i] = { key: lastRenderedPieces[i].key, text: currentLines[i] };
+    }
+  }
+  if(currentLines.length > knownCount){
+    extraTrailingText = currentLines.slice(knownCount).join('\n');
+  } else if(currentLines.length < knownCount){
+    // righe intere cancellate dalla fine: quelle sezioni tornano automatiche
+    for(let i = currentLines.length; i < knownCount; i++){
+      delete manualSections[lastRenderedPieces[i].key];
+    }
+    lastRenderedPieces = lastRenderedPieces.slice(0, currentLines.length);
+    extraTrailingText = '';
+  }
+  clearOutputHighlight();
+});
 
 function copyOutput(){
   const out = document.getElementById('output');
@@ -1621,7 +1657,9 @@ function resetAll(){
   document.querySelectorAll('.params-box').forEach(p => p.classList.remove('show'));
   document.querySelectorAll('input[type=number], input[type=text]').forEach(i => i.value = '');
   for(const k in state) state[k] = [];
-  manualEdit = false;
+  manualSections = {};
+  lastRenderedPieces = [];
+  extraTrailingText = '';
   highlightSource = null;
   render();
   clearOutputHighlight();
@@ -1744,13 +1782,17 @@ async function loadConsegna(id){
   document.getElementById('letto-val').value = item.letto || '';
   document.getElementById('eta-val').value = item.eta || '';
   highlightSource = null;
+  manualSections = {};
+  lastRenderedPieces = [];
+  extraTrailingText = '';
   if(item.stato && Object.keys(item.stato).length){
     applyState(item.stato, item.inputs);
-    manualEdit = false;
     render();
   } else {
-    document.getElementById('output').value = item.testo || '';
-    manualEdit = true;
+    const testo = item.testo || '';
+    document.getElementById('output').value = testo;
+    extraTrailingText = testo;
+    lastRenderedPieces = testo.split('\n').map((t, i) => ({ key: '_extra' + i, text: t }));
   }
   clearOutputHighlight();
   window.scrollTo({ top: 0, behavior: 'smooth' });
