@@ -280,6 +280,50 @@
   .saved-item-name{font-weight:600;font-size:.82rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .saved-item-meta{color:var(--ink);font-size:.75rem;}
   .saved-item-date{color:var(--sub);font-size:.68rem;}
+
+  @media (min-width:900px){
+    .layout{
+      display:flex;
+      flex-direction:row-reverse;
+      align-items:flex-start;
+      max-width:1100px;
+      margin:0 auto;
+      gap:20px;
+    }
+    .layout main{
+      max-width:none;
+      flex:1;
+      min-width:0;
+      margin:18px 0;
+    }
+    .output-wrap{
+      position:sticky;
+      top:18px;
+      bottom:auto;
+      width:auto;
+      max-width:none;
+      flex:1;
+      min-width:0;
+      margin:18px 0 0;
+      height:calc(100vh - 36px);
+      max-height:calc(100vh - 36px);
+      border-radius:12px;
+    }
+    .output-wrap.collapsed .output-body{display:flex !important;flex-direction:column;}
+    .output-header{cursor:default;}
+    .toggle-btn{display:none;}
+    .output-body{
+      flex:1;
+      display:flex;
+      flex-direction:column;
+      min-height:0;
+    }
+    .output-body textarea{
+      flex:1;
+      max-height:none;
+    }
+    .output-body .actions{flex-shrink:0;}
+  }
 </style>
 </head>
 <body>
@@ -289,6 +333,7 @@
   <p>Seleziona i flag di ogni sezione: la consegna si compone qui sotto, in ordine, editabile a mano.</p>
 </header>
 
+<div class="layout">
 <main>
 
   <section class="card">
@@ -713,6 +758,7 @@
       <span class="copied" id="saved-msg" style="display:none;">Salvata ✓</span>
     </div>
   </div>
+</div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
