@@ -1260,7 +1260,8 @@ function render(){
       materialeTxt = joinItalian(combined);
     }
     let aspirazioneTxt = state[aspGroup] && state[aspGroup][0];
-    const aspVal = document.getElementById(aspInputId) ? document.getElementById(aspInputId).value : '';
+    const aspValRaw = document.getElementById(aspInputId) ? document.getElementById(aspInputId).value : '';
+    const aspVal = aspValRaw.replace(/^-+/, ''); // il "-" è già aggiunto sotto: evita "--20" se l'utente lo scrive da sé
     let aspirazioneFull = '';
     if(aspirazioneTxt === 'in aspirazione'){
       aspirazioneFull = 'in aspirazione' + (aspVal ? ` a -${aspVal} cmH2O` : '');
