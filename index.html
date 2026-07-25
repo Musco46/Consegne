@@ -14,8 +14,8 @@
     --n1:#6A3FA0;
     --n2:#3D7DBF;
     --n3:#B3261E;
-    --n4:#A67B00;
-    --n5:#C2255C;
+    --n4:#B38600;
+    --n5:#D8467D;
     --n6:#2E7D4F;
     --n7:#475569;
     --save:#2E7D4F;
@@ -192,18 +192,45 @@
   }
   .output-wrap.collapsed .output-body{display:none;}
   .output-wrap.collapsed .toggle-btn::after{content:'';}
-  textarea{
+  .textarea-stack{
+    position:relative;
     width:100%;
     min-height:140px;
     max-height:40vh;
-    border:1px solid var(--line);
+    background:var(--card);
     border-radius:8px;
-    padding:12px;
+  }
+  textarea, #output-highlight-mark{
     font-family:'Consolas','SF Mono',ui-monospace,monospace;
     font-size:.86rem;
     line-height:1.5;
+    padding:12px;
+    border:1px solid transparent;
+    border-radius:8px;
+    white-space:pre-wrap;
+    word-wrap:break-word;
+  }
+  textarea{
+    position:absolute;
+    inset:0;
+    width:100%;
+    height:100%;
+    border-color:var(--line);
+    background:transparent;
     color:var(--ink);
-    resize:vertical;
+    resize:none;
+  }
+  #output-highlight-mark{
+    position:absolute;
+    inset:0;
+    overflow:hidden;
+    pointer-events:none;
+    z-index:0;
+  }
+  .output-highlight-rect{
+    position:absolute;
+    background:rgba(255,196,0,.4);
+    border-radius:3px;
   }
   .actions{display:flex;gap:8px;margin-top:10px;}
   button.act{
@@ -218,7 +245,7 @@
   button.copy{background:var(--ink);color:white;}
   button.save{background:var(--save);color:white;}
   button.reset{background:#EEF1F3;color:var(--ink);}
-  .copied{color:var(--n5);font-size:.82rem;margin-left:4px;align-self:center;}
+  .copied{color:var(--save);font-size:.82rem;margin-left:4px;align-self:center;}
 
   .saved-save-row{
     display:flex;
@@ -313,9 +340,10 @@
       flex-direction:column;
       min-height:0;
     }
-    .output-body textarea{
+    .output-body .textarea-stack{
       flex:1;
       max-height:none;
+      min-height:0;
     }
     .output-body .actions{flex-shrink:0;}
   }
@@ -469,7 +497,7 @@
     <h2><span class="badge">3</span>Circolo</h2>
 
     <div class="group" data-group="C-stato" data-mode="radio">
-      <div class="group-label">Stato emodinamico</div>
+      <div class="group-label">Emodinamica</div>
       <div class="flags">
         <span class="inline-group" data-group="C-stato" data-mode="radio">
         <span class="flag" data-text="stabile" data-sub="C-catetere-arterioso">Stabile</span>
@@ -528,6 +556,7 @@
         <div class="sub-flags-inner">
         <span class="flag" data-text="urine chiare">Chiare</span>
         <span class="flag" data-text="urine concentrate">Concentrate</span>
+        <span class="flag" data-text="urine ipercromiche">Ipercromiche</span>
         <span class="flag" data-text="urine ematiche">Ematiche</span>
         <span class="flag" data-text="urine torbide">Torbide</span>
         </div>
@@ -553,7 +582,7 @@
     </div>
 
     <div class="group" data-group="U-via-enterale-sel" data-mode="radio">
-      <div class="group-label">Accesso digestivo (SNG / gastrostomia)</div>
+      <div class="group-label">Accesso enterale</div>
       <div class="flags">
         <span class="flag" data-text="tramite SNG" data-sub="U-via-stato U-ristagno">SNG</span>
         <span class="flag" data-text="tramite gastrostomia" data-sub="U-via-stato U-ristagno">Gastrostomia</span>
@@ -698,7 +727,7 @@
     <h2><span class="badge">6</span>Attività di turno</h2>
 
     <div class="group" data-group="T-medicazione-dispositivi" data-mode="checkbox">
-      <div class="group-label">Medicazione dispositivi</div>
+      <div class="group-label">Medicazione presidi</div>
       <div class="flags">
         <span class="flag" data-text="CVC">CVC</span>
         <span class="flag" data-text="linea arteriosa">Arterioso</span>
@@ -739,7 +768,10 @@
     <button class="toggle-btn" id="toggle-btn" type="button">Nascondi ▼</button>
   </div>
   <div class="output-body" id="output-body">
-    <textarea id="output"></textarea>
+    <div class="textarea-stack">
+      <div id="output-highlight-mark" aria-hidden="true"></div>
+      <textarea id="output"></textarea>
+    </div>
     <div class="actions">
       <button class="act copy" onclick="copyOutput()">Copia</button>
       <button class="act save" onclick="saveConsegna()">Salva</button>
@@ -1238,7 +1270,7 @@ function render(){
   document.getElementById('output').value = finalLines.join('\n');
 }
 
-document.getElementById('output').addEventListener('input', () => { manualEdit = true; });
+document.getElementById('output').addEventListener('input', () => { manualEdit = true; setOutputHighlight(null); });
 
 function copyOutput(){
   const out = document.getElementById('output');
@@ -1287,14 +1319,84 @@ document.querySelectorAll('input, select').forEach(el => {
   });
 });
 
+// Una <textarea> non supporta la formattazione (non si può rendere in grassetto solo un
+// tratto di testo nativo), quindi come equivalente disegniamo un riquadro evidenziato
+// dietro al testo appena aggiunto, usando un div "specchio" fuori schermo per misurare
+// la posizione esatta (gestisce anche il caso in cui il testo vada a capo su più righe).
+// Resta visibile finché non viene sostituito dal prossimo flag/campo modificato.
+let outputHighlightText = null;
+let lastHighlightRects = [];
+
+function updateOutputHighlightMark(){
+  const textarea = document.getElementById('output');
+  const markEl = document.getElementById('output-highlight-mark');
+  markEl.innerHTML = '';
+  lastHighlightRects = [];
+  if(!outputHighlightText) return;
+  const value = textarea.value;
+  let idx = value.indexOf(outputHighlightText);
+  if(idx === -1) idx = value.toLowerCase().indexOf(outputHighlightText.toLowerCase());
+  if(idx === -1) return;
+  const len = Math.max(outputHighlightText.length, 1);
+
+  const mirror = document.createElement('div');
+  const cs = getComputedStyle(textarea);
+  ['fontFamily','fontSize','fontWeight','fontStyle','lineHeight','letterSpacing','padding','borderWidth','boxSizing','wordBreak'].forEach(p => { mirror.style[p] = cs[p]; });
+  mirror.style.whiteSpace = 'pre-wrap';
+  mirror.style.wordWrap = 'break-word';
+  mirror.style.position = 'absolute';
+  mirror.style.visibility = 'hidden';
+  mirror.style.height = 'auto';
+  mirror.style.width = textarea.clientWidth + 'px';
+  mirror.style.left = '-9999px';
+  mirror.style.top = '0';
+  document.body.appendChild(mirror);
+
+  mirror.appendChild(document.createTextNode(value.slice(0, idx)));
+  const span = document.createElement('span');
+  span.textContent = value.slice(idx, idx + len) || '​';
+  mirror.appendChild(span);
+  mirror.appendChild(document.createTextNode(value.slice(idx + span.textContent.length)));
+
+  const mirrorRect = mirror.getBoundingClientRect();
+  const range = document.createRange();
+  range.selectNodeContents(span);
+  const rects = Array.from(range.getClientRects());
+
+  rects.forEach(r => {
+    const top = r.top - mirrorRect.top;
+    const left = r.left - mirrorRect.left;
+    lastHighlightRects.push({ top, left, width: r.width, height: r.height });
+    const mark = document.createElement('div');
+    mark.className = 'output-highlight-rect';
+    mark.style.left = left + 'px';
+    mark.style.top = (top - textarea.scrollTop) + 'px';
+    mark.style.width = r.width + 'px';
+    mark.style.height = r.height + 'px';
+    markEl.appendChild(mark);
+  });
+
+  document.body.removeChild(mirror);
+}
+
+function setOutputHighlight(searchText){
+  outputHighlightText = searchText || null;
+  updateOutputHighlightMark();
+}
+
+document.getElementById('output').addEventListener('scroll', () => {
+  const textarea = document.getElementById('output');
+  const markEl = document.getElementById('output-highlight-mark');
+  Array.from(markEl.children).forEach((child, i) => {
+    const base = lastHighlightRects[i];
+    if(base) child.style.top = (base.top - textarea.scrollTop) + 'px';
+  });
+});
+window.addEventListener('resize', () => updateOutputHighlightMark());
+
 // Scorre la textarea della consegna generata fino al testo del flag appena selezionato,
 // centrandolo in verticale; se non lo trova (es. testo cambiato dalla concordanza di
 // genere) scorre semplicemente in fondo, dove di norma si trova il contenuto più recente.
-// Una <textarea> non supporta la formattazione (non si può rendere in grassetto solo un
-// tratto di testo), quindi come equivalente evidenziamo temporaneamente il tratto appena
-// aggiunto con la selezione nativa del browser: resta visibile anche senza dare il focus
-// (quindi non apre la tastiera su mobile) e si annulla da sola dopo poco.
-let outputHighlightTimer = null;
 function scrollTextareaToText(textarea, searchText, fallbackToEnd=true){
   if(textarea.clientHeight === 0) return;
   const value = textarea.value;
@@ -1302,6 +1404,7 @@ function scrollTextareaToText(textarea, searchText, fallbackToEnd=true){
   if(idx === -1 && searchText) idx = value.toLowerCase().indexOf(searchText.toLowerCase());
   if(idx === -1){
     if(fallbackToEnd) textarea.scrollTop = textarea.scrollHeight;
+    setOutputHighlight(null);
     return;
   }
   const len = Math.max(searchText.length, 1);
@@ -1331,15 +1434,8 @@ function scrollTextareaToText(textarea, searchText, fallbackToEnd=true){
   const maxScroll = Math.max(0, textarea.scrollHeight - textarea.clientHeight);
   const target = markerTop - (textarea.clientHeight / 2) + (markerHeight / 2);
   const desiredScroll = Math.max(0, Math.min(target, maxScroll));
-
-  const endPos = idx + len;
-  if(outputHighlightTimer) clearTimeout(outputHighlightTimer);
-  textarea.setSelectionRange(idx, endPos);
-  textarea.scrollTop = desiredScroll; // riapplicato dopo la selezione, che su alcuni browser può alterare lo scroll
-  outputHighlightTimer = setTimeout(() => {
-    textarea.setSelectionRange(endPos, endPos);
-    outputHighlightTimer = null;
-  }, 1400);
+  textarea.scrollTop = desiredScroll;
+  setOutputHighlight(searchText);
 }
 
 // Scorre il form in modo che la categoria del flag appena cliccato si porti sempre alla
@@ -1371,6 +1467,7 @@ function resetAll(){
   for(const k in state) state[k] = [];
   manualEdit = false;
   render();
+  setOutputHighlight(null);
 }
 
 function escapeHtml(str){
@@ -1497,6 +1594,7 @@ async function loadConsegna(id){
     document.getElementById('output').value = item.testo || '';
     manualEdit = true;
   }
+  setOutputHighlight(null);
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
