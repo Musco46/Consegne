@@ -15,7 +15,7 @@
     --n2:#4A8BC9;
     --n3:#B3261E;
     --n4:#C29A00;
-    --n5:#DB2E70;
+    --n5:#E85E93;
     --n6:#2E7D4F;
     --n7:#475569;
     --save:#2E7D4F;
@@ -792,6 +792,36 @@ const sb = window.supabase.createClient(
 
 const state = {};
 let manualEdit = false;
+
+// Niente barra AutoFill (contatti/password) sopra la tastiera sui campi di testo libero.
+// Su iOS il trucco è type="search": quei campi non attivano l'AutoFill. I campi numerici
+// (FiO2, PEEP, atti/min, ecc.) restano type="number" per mantenere il tastierino numerico.
+(function hardenTextInputsAgainstAutofill(){
+  const SKIP_TYPES = ['date','datetime-local','time','month','week','number','range',
+    'checkbox','radio','color','file','password','email','tel','url'];
+  document.querySelectorAll('input, textarea').forEach(el => {
+    const type = (el.getAttribute('type') || 'text').toLowerCase();
+    if(SKIP_TYPES.includes(type)) return;
+    el.setAttribute('autocomplete', 'off');
+    el.setAttribute('autocorrect', 'off');
+    el.setAttribute('spellcheck', 'false');
+    if(el.tagName === 'INPUT' && el.type !== 'search') el.type = 'search';
+  });
+})();
+
+// La tastiera nativa mobile mostra un tasto "successivo" (passa al campo dopo) invece di un
+// tasto "fine" che chiude la tastiera. enterkeyhint cambia l'etichetta del tasto, ma per
+// chiudere davvero la tastiera serve comunque togliere il focus manualmente sull'invio.
+// Esclude la textarea della consegna generata, dove Invio deve continuare a andare a capo.
+document.querySelectorAll('input, textarea:not(#output)').forEach(el => {
+  el.setAttribute('enterkeyhint', 'done');
+  el.addEventListener('keydown', e => {
+    if(e.key === 'Enter'){
+      e.preventDefault();
+      el.blur();
+    }
+  });
+});
 
 document.querySelectorAll('.flag').forEach(flag => {
   flag.addEventListener('click', () => {
