@@ -305,8 +305,8 @@
       flex:1;
       min-width:0;
       margin:18px 0 0;
-      height:calc(100vh - 36px);
-      max-height:calc(100vh - 36px);
+      height:calc(100vh - var(--header-h, 90px) - 36px);
+      max-height:calc(100vh - var(--header-h, 90px) - 36px);
       border-radius:12px;
     }
     .output-wrap.collapsed .output-body{display:flex !important;flex-direction:column;}
@@ -336,7 +336,7 @@
 <div class="layout">
 <main>
 
-  <section class="card">
+  <section class="card" id="saved-section">
     <h2 style="margin:0 0 12px;font-size:1.05rem;">Consegne salvate</h2>
     <div id="saved-list"><p class="saved-empty">Caricamento...</p></div>
   </section>
@@ -1253,6 +1253,14 @@ function copyOutput(){
   });
 }
 
+function updateHeaderHeightVar(){
+  const header = document.querySelector('header');
+  document.documentElement.style.setProperty('--header-h', header.offsetHeight + 'px');
+}
+window.addEventListener('load', updateHeaderHeightVar);
+window.addEventListener('resize', updateHeaderHeightVar);
+updateHeaderHeightVar();
+
 function toggleOutput(){
   const wrap = document.getElementById('output-wrap');
   const btn = document.getElementById('toggle-btn');
@@ -1359,6 +1367,8 @@ function applyState(savedState, savedInputs){
 
 async function loadSavedList(){
   const container = document.getElementById('saved-list');
+  const section = document.getElementById('saved-section');
+  section.style.display = '';
   container.innerHTML = '<p class="saved-empty">Caricamento...</p>';
   const { data: items, error } = await sb.from('consegne_turno').select('*').order('creato_il', { ascending: false });
   if(error){
@@ -1367,7 +1377,7 @@ async function loadSavedList(){
     return;
   }
   if(!items || items.length === 0){
-    container.innerHTML = '<p class="saved-empty">Nessuna consegna salvata.</p>';
+    section.style.display = 'none';
     return;
   }
   container.innerHTML = items.map(item => {
