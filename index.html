@@ -578,8 +578,8 @@
         <span class="flag" data-text="in nutrizione enterale">Enterale</span>
         <span class="flag" data-text="in nutrizione parenterale">Parenterale</span>
         <span class="flag" data-text="alimentazione per via orale">Per os</span>
-        <span class="flag" data-text="alimentato tramite biberon">Biberon</span>
-        <span class="flag" data-text="alimentato al seno">Al seno</span>
+        <span class="flag" data-text="tramite biberon">Biberon</span>
+        <span class="flag" data-text="al seno">Al seno</span>
       </div>
     </div>
 
@@ -961,7 +961,6 @@ function feminizeText(text){
     ['soporoso', 'soporosa'],
     ['comatoso', 'comatosa'],
     ['posturato', 'posturata'],
-    ['alimentato', 'alimentata'],
     ['apiretico', 'apiretica'],
     ['ipotermico', 'ipotermica'],
     ['bronco-aspirato', 'bronco-aspirata'],
@@ -1211,7 +1210,25 @@ function render(){
       extraBits.push(ristagnoTxt ? ('presente ' + ristagnoTxt + ristagnoQtySuffix) : 'ben tollerata');
       enteraleExtra = ` ${uVia}, ` + extraBits.join(', ');
     }
-    const alimTxt = uAlimArr.map(a => a === 'in nutrizione enterale' ? (a + enteraleExtra) : a).join(', ');
+    // biberon e al seno, se scelti insieme, si uniscono con "e" sotto un unico "si
+    // alimenta" invece di ripetersi separati (es. "si alimenta tramite biberon e al seno").
+    const NUTRIZIONE_KEYS = ['tramite biberon', 'al seno'];
+    const nutrizioneItems = uAlimArr.filter(a => NUTRIZIONE_KEYS.includes(a));
+    let nutrizioneInserted = false;
+    const displayArr = [];
+    uAlimArr.forEach(a => {
+      if(NUTRIZIONE_KEYS.includes(a)){
+        if(!nutrizioneInserted){
+          displayArr.push('si alimenta ' + joinItalian(nutrizioneItems));
+          nutrizioneInserted = true;
+        }
+      } else if(a === 'in nutrizione enterale'){
+        displayArr.push(a + enteraleExtra);
+      } else {
+        displayArr.push(a);
+      }
+    });
+    const alimTxt = displayArr.join(', ');
     uParts.push(mark(sourceMatches('U-alimentazione', ...ACCESSO_KEYS), alimTxt));
   }
 
