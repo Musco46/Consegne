@@ -14,8 +14,8 @@
     --n1:#6A3FA0;
     --n2:#3D7DBF;
     --n3:#B3261E;
-    --n4:#C1620C;
-    --n5:#B8860B;
+    --n4:#A67B00;
+    --n5:#C2255C;
     --n6:#2E7D4F;
     --n7:#475569;
     --save:#2E7D4F;
@@ -843,7 +843,12 @@ document.querySelectorAll('.flag').forEach(flag => {
  'temp-val','ristagno-qta-val','altro-sede-val',
  'tor-asp-val','tor-qta-val','add-asp-val','add-qta-val','cra-asp-val','cra-qta-val','alt-asp-val','alt-qta-val'].forEach(id => {
   const el = document.getElementById(id);
-  if(el) el.addEventListener('input', () => { manualEdit = false; render(); });
+  if(el) el.addEventListener('input', () => {
+    manualEdit = false;
+    render();
+    const val = el.value.trim();
+    if(val) scrollTextareaToText(document.getElementById('output'), val);
+  });
 });
 
 function joinPhrases(arr, sep=', '){
@@ -1285,15 +1290,21 @@ document.querySelectorAll('input, select').forEach(el => {
 // Scorre la textarea della consegna generata fino al testo del flag appena selezionato,
 // centrandolo in verticale; se non lo trova (es. testo cambiato dalla concordanza di
 // genere) scorre semplicemente in fondo, dove di norma si trova il contenuto più recente.
-function scrollTextareaToText(textarea, searchText){
+// Una <textarea> non supporta la formattazione (non si può rendere in grassetto solo un
+// tratto di testo), quindi come equivalente evidenziamo temporaneamente il tratto appena
+// aggiunto con la selezione nativa del browser: resta visibile anche senza dare il focus
+// (quindi non apre la tastiera su mobile) e si annulla da sola dopo poco.
+let outputHighlightTimer = null;
+function scrollTextareaToText(textarea, searchText, fallbackToEnd=true){
   if(textarea.clientHeight === 0) return;
   const value = textarea.value;
   let idx = searchText ? value.indexOf(searchText) : -1;
   if(idx === -1 && searchText) idx = value.toLowerCase().indexOf(searchText.toLowerCase());
   if(idx === -1){
-    textarea.scrollTop = textarea.scrollHeight;
+    if(fallbackToEnd) textarea.scrollTop = textarea.scrollHeight;
     return;
   }
+  const len = Math.max(searchText.length, 1);
   const mirror = document.createElement('div');
   const cs = getComputedStyle(textarea);
   ['fontFamily','fontSize','fontWeight','fontStyle','lineHeight','letterSpacing','padding','borderWidth','boxSizing','wordBreak'].forEach(p => { mirror.style[p] = cs[p]; });
@@ -1309,7 +1320,7 @@ function scrollTextareaToText(textarea, searchText){
 
   mirror.appendChild(document.createTextNode(value.slice(0, idx)));
   const marker = document.createElement('span');
-  marker.textContent = value.slice(idx, idx + Math.max(searchText.length, 1)) || '​';
+  marker.textContent = value.slice(idx, idx + len) || '​';
   mirror.appendChild(marker);
   mirror.appendChild(document.createTextNode(value.slice(idx + marker.textContent.length)));
 
@@ -1319,7 +1330,16 @@ function scrollTextareaToText(textarea, searchText){
 
   const maxScroll = Math.max(0, textarea.scrollHeight - textarea.clientHeight);
   const target = markerTop - (textarea.clientHeight / 2) + (markerHeight / 2);
-  textarea.scrollTop = Math.max(0, Math.min(target, maxScroll));
+  const desiredScroll = Math.max(0, Math.min(target, maxScroll));
+
+  const endPos = idx + len;
+  if(outputHighlightTimer) clearTimeout(outputHighlightTimer);
+  textarea.setSelectionRange(idx, endPos);
+  textarea.scrollTop = desiredScroll; // riapplicato dopo la selezione, che su alcuni browser può alterare lo scroll
+  outputHighlightTimer = setTimeout(() => {
+    textarea.setSelectionRange(endPos, endPos);
+    outputHighlightTimer = null;
+  }, 1400);
 }
 
 // Scorre il form in modo che la categoria del flag appena cliccato si porti sempre alla
