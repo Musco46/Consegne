@@ -578,7 +578,7 @@
         <span class="flag" data-text="in nutrizione enterale">Enterale</span>
         <span class="flag" data-text="in nutrizione parenterale">Parenterale</span>
         <span class="flag" data-text="alimentazione per via orale">Per os</span>
-        <span class="flag" data-text="alimentato a poppate">A poppate</span>
+        <span class="flag" data-text="alimentato tramite biberon">Biberon</span>
         <span class="flag" data-text="alimentato al seno">Al seno</span>
       </div>
     </div>
@@ -897,7 +897,6 @@ document.querySelectorAll('.flag').forEach(flag => {
       updateVentParamsVisibility();
     }
 
-    manualEdit = false;
     highlightSource = groupName;
     render();
     // Si ancora al ".group" più esterno (non al gruppo/sotto-pannello più vicino usato per
@@ -914,7 +913,6 @@ document.querySelectorAll('.flag').forEach(flag => {
  'tor-asp-val','tor-qta-val','add-asp-val','add-qta-val','cra-asp-val','cra-qta-val','alt-asp-val','alt-qta-val'].forEach(id => {
   const el = document.getElementById(id);
   if(el) el.addEventListener('input', () => {
-    manualEdit = false;
     highlightSource = id;
     render();
   });
@@ -1347,18 +1345,19 @@ function render(){
 // costruisce la frase, quale tratto appartiene al gruppo appena modificato.
 function applyRenderedText(markedText){
   const textarea = document.getElementById('output');
+  // Il range evidenziato si calcola sulla PRIMA coppia di marcatori: se il gruppo appena
+  // toccato ha più elementi (es. più esami già selezionati), ognuno riceve la propria
+  // coppia nello stesso render, ma vogliamo evidenziarne solo uno. Indipendentemente da
+  // questo, rimuoviamo SEMPRE tutti i marcatori residui dal testo finale: lasciarne anche
+  // solo una coppia in più (rimuovendo solo la prima) inserirebbe caratteri di controllo
+  // invisibili nel testo vero, visibili come simboli strani in alcuni font/browser.
   const idxA = markedText.indexOf(MARK_START);
-  let clean = markedText;
   let range = null;
   if(idxA !== -1){
     const idxB = markedText.indexOf(MARK_END, idxA);
-    if(idxB !== -1){
-      clean = markedText.slice(0, idxA) + markedText.slice(idxA + 1, idxB) + markedText.slice(idxB + 1);
-      if(idxB - 1 > idxA) range = { start: idxA, end: idxB - 1 };
-    } else {
-      clean = markedText.split(MARK_START).join('');
-    }
+    if(idxB !== -1 && idxB - 1 > idxA) range = { start: idxA, end: idxB - 1 };
   }
+  const clean = markedText.split(MARK_START).join('').split(MARK_END).join('');
   textarea.value = clean;
   if(!range){
     clearOutputHighlight();
