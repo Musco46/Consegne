@@ -571,7 +571,7 @@
       </div>
     </div>
 
-    <div class="group" data-group="U-alimentazione" data-mode="radio">
+    <div class="group" data-group="U-alimentazione" data-mode="checkbox">
       <div class="group-label">Alimentazione</div>
       <div class="flags">
         <span class="flag" data-text="a digiuno">A digiuno</span>
@@ -1188,13 +1188,13 @@ function render(){
     uParts.push(mark(sourceMatches('U-lasix'), 'in terapia con Lasix'));
   }
 
-  let uAlim = state['U-alimentazione'] && state['U-alimentazione'][0];
+  let uAlimArr = state['U-alimentazione'] || [];
   let uVia = state['U-via-enterale-sel'] && state['U-via-enterale-sel'][0];
   const hasDeviceForRistagno = uVia === 'tramite SNG' || uVia === 'tramite gastrostomia';
   let uViaStato = hasDeviceForRistagno ? (state['U-via-stato-sel'] && state['U-via-stato-sel'][0]) : '';
   if(uViaStato === 'chiuso' && uVia === 'tramite gastrostomia') uViaStato = 'chiusa';
   const ristagnoTxt = hasDeviceForRistagno ? (state['U-ristagno-sel'] && state['U-ristagno-sel'][0]) : '';
-  const viaMentionedInAlim = uAlim === 'in nutrizione enterale' && !!uVia;
+  const viaMentionedInAlim = uAlimArr.includes('in nutrizione enterale') && !!uVia;
   const deviceLabel = uVia === 'tramite SNG' ? 'SNG' : 'gastrostomia';
   const devicePrep = uVia === 'tramite SNG' ? 'dal SNG' : 'dalla gastrostomia';
 
@@ -1202,16 +1202,18 @@ function render(){
   const ristagnoQtySuffix = ristagnoQta ? ` (${ristagnoQta} ml)` : '';
   const ACCESSO_KEYS = ['U-via-enterale-sel', 'U-via-stato-sel', 'U-ristagno-sel', 'ristagno-qta-val'];
 
-  if(uAlim){
-    let alimTxt = viaMentionedInAlim ? `${uAlim} ${uVia}` : uAlim;
+  if(uAlimArr.length){
+    // possono essere selezionate più modalità di alimentazione insieme (es. digiuno +
+    // biberon); il dispositivo enterale (SNG/gastrostomia), se presente, si aggancia
+    // solo alla voce "in nutrizione enterale", ovunque si trovi tra quelle scelte.
+    let enteraleExtra = '';
     if(viaMentionedInAlim){
-      // stato e ristagno dell'accesso, se presenti, restano nella stessa frase
-      // della nutrizione enterale (il dispositivo è già nominato qui)
       const extraBits = [];
       if(uViaStato) extraBits.push(uViaStato);
       extraBits.push(ristagnoTxt ? ('presente ' + ristagnoTxt + ristagnoQtySuffix) : 'ben tollerata');
-      alimTxt += ', ' + extraBits.join(', ');
+      enteraleExtra = ` ${uVia}, ` + extraBits.join(', ');
     }
+    const alimTxt = uAlimArr.map(a => a === 'in nutrizione enterale' ? (a + enteraleExtra) : a).join(', ');
     uParts.push(mark(sourceMatches('U-alimentazione', ...ACCESSO_KEYS), alimTxt));
   }
 
