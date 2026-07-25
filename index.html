@@ -1,0 +1,1372 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Consegne di turno</title>
+<style>
+  :root{
+    --bg:#F5F7F8;
+    --card:#FFFFFF;
+    --ink:#1B2430;
+    --sub:#5B6B79;
+    --line:#E2E8ED;
+    --n1:#6A3FA0;
+    --n2:#2A5DB0;
+    --n3:#B3261E;
+    --n4:#0E7C8C;
+    --n5:#2E7D4F;
+    --n6:#B8860B;
+    --n7:#475569;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    font-family:'Segoe UI', system-ui, -apple-system, sans-serif;
+    background:var(--bg);
+    color:var(--ink);
+  }
+  header{
+    padding:22px 20px 14px;
+    max-width:600px;
+    margin:0 auto;
+  }
+  header h1{
+    font-size:1.4rem;
+    margin:0 0 2px;
+    letter-spacing:.2px;
+  }
+  header p{
+    margin:0;
+    color:var(--sub);
+    font-size:.9rem;
+  }
+
+  main{max-width:600px;margin:18px auto;padding:0 20px;display:flex;flex-direction:column;gap:16px;}
+  @media (max-width:560px){ main{padding:0 10px;} }
+
+  section.card{
+    background:var(--card);
+    border:1px solid var(--line);
+    border-radius:12px;
+    padding:16px 18px 18px;
+    scroll-margin-top:16px;
+  }
+  section.card h2{
+    display:flex;align-items:center;gap:10px;
+    margin:0 0 12px;
+    font-size:1.05rem;
+  }
+  section.card h2 .badge{
+    width:28px;height:28px;border-radius:50%;
+    color:white;display:flex;align-items:center;justify-content:center;
+    font-weight:700;font-size:.9rem;flex-shrink:0;
+  }
+  .s1 .badge{background:var(--n1);} .s2 .badge{background:var(--n2);}
+  .s3 .badge{background:var(--n3);} .s4 .badge{background:var(--n4);}
+  .s5 .badge{background:var(--n5);} .s6 .badge{background:var(--n6);}
+  .s7 .badge{background:var(--n7);}
+
+  .group{margin-bottom:12px;}
+  .group:not(:last-child){border-bottom:1px solid var(--line);padding-bottom:12px;}
+  .group:last-child{margin-bottom:0;}
+  .group-label{
+    font-size:.78rem;
+    text-transform:uppercase;
+    letter-spacing:.5px;
+    color:var(--sub);
+    margin-bottom:6px;
+    font-weight:600;
+  }
+  .flags{display:flex;flex-wrap:wrap;gap:7px;align-items:center;}
+  .flag{
+    border:1px solid var(--line);
+    background:#fbfcfd;
+    color:var(--ink);
+    padding:7px 13px;
+    border-radius:20px;
+    font-size:.85rem;
+    cursor:pointer;
+    user-select:none;
+    transition:background .12s, color .12s, border-color .12s;
+  }
+  .flag:hover{border-color:#c4ccd4;}
+  .flag.on{background:var(--ink);border-color:var(--ink);color:white;}
+  .s1 .flag.on{background:var(--n1);border-color:var(--n1);color:white;}
+  .s2 .flag.on{background:var(--n2);border-color:var(--n2);color:white;}
+  .s3 .flag.on{background:var(--n3);border-color:var(--n3);color:white;}
+  .s4 .flag.on{background:var(--n4);border-color:var(--n4);color:white;}
+  .s5 .flag.on{background:var(--n5);border-color:var(--n5);color:white;}
+  .s6 .flag.on{background:var(--n6);border-color:var(--n6);color:white;}
+  .s7 .flag.on{background:var(--n7);border-color:var(--n7);color:white;}
+
+  .inline-input{
+    display:inline-flex;align-items:center;gap:6px;
+    font-size:.85rem;color:var(--sub);
+    margin-left:4px;
+  }
+  .inline-input input, .inline-input select{
+    border:1px solid var(--line);
+    border-radius:8px;
+    padding:5px 8px;
+    font-size:.85rem;
+    width:70px;
+    font-family:inherit;
+  }
+  .inline-input input.wide{width:220px;}
+
+  .sub-flags{
+    margin-top:8px;
+    margin-left:16px;
+    padding:10px 14px;
+    border-left:3px solid var(--line);
+    background:#FAFBFC;
+    border-radius:0 8px 8px 0;
+    display:none;
+  }
+  .sub-flags.show{display:block;}
+  .sub-label{
+    font-size:.72rem;
+    text-transform:uppercase;
+    letter-spacing:.4px;
+    color:var(--sub);
+    font-weight:600;
+    margin-bottom:6px;
+  }
+  .sub-flags-inner{display:flex;flex-wrap:wrap;gap:7px;}
+  .mini-group{margin-bottom:10px;}
+  .mini-group:last-child{margin-bottom:0;}
+  .inline-group{display:contents;}
+  .sub-flags .flag{padding:5px 11px;font-size:.8rem;}
+  .s1 .sub-flags{border-left-color:var(--n1);}
+  .s2 .sub-flags{border-left-color:var(--n2);}
+  .s3 .sub-flags{border-left-color:var(--n3);}
+  .s4 .sub-flags{border-left-color:var(--n4);}
+  .s5 .sub-flags{border-left-color:var(--n5);}
+  .s6 .sub-flags{border-left-color:var(--n6);}
+  .s7 .sub-flags{border-left-color:var(--n7);}
+
+  .params-box{
+    margin-top:10px;
+    padding:10px 12px;
+    background:#F7F9FA;
+    border:1px solid var(--line);
+    border-radius:8px;
+    display:none;
+    flex-wrap:wrap;
+    gap:10px;
+  }
+  .params-box.show{display:flex;}
+
+  .output-wrap{
+    position:sticky;
+    bottom:0;
+    width:100%;
+    max-width:600px;
+    margin:4px auto 0;
+    background:var(--card);
+    border:1px solid var(--line);
+    border-radius:12px 12px 0 0;
+    box-shadow:0 -4px 14px rgba(20,30,40,.06);
+    max-height:70vh;
+    display:flex;
+    flex-direction:column;
+    z-index:20;
+  }
+  .output-header{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    padding:10px 18px;
+    cursor:pointer;
+    flex-shrink:0;
+  }
+  .output-header h2{margin:0;font-size:.95rem;}
+  .toggle-btn{
+    border:none;
+    background:#EEF1F3;
+    color:var(--ink);
+    border-radius:8px;
+    padding:6px 12px;
+    font-size:.78rem;
+    font-weight:600;
+    cursor:pointer;
+  }
+  .output-body{
+    padding:0 18px 16px;
+    overflow-y:auto;
+  }
+  .output-wrap.collapsed .output-body{display:none;}
+  .output-wrap.collapsed .toggle-btn::after{content:'';}
+  textarea{
+    width:100%;
+    min-height:140px;
+    max-height:40vh;
+    border:1px solid var(--line);
+    border-radius:8px;
+    padding:12px;
+    font-family:'Consolas','SF Mono',ui-monospace,monospace;
+    font-size:.86rem;
+    line-height:1.5;
+    color:var(--ink);
+    resize:vertical;
+  }
+  .actions{display:flex;gap:8px;margin-top:10px;}
+  button.act{
+    border:none;
+    border-radius:8px;
+    padding:9px 16px;
+    font-size:.85rem;
+    font-weight:600;
+    cursor:pointer;
+  }
+  button.copy{background:var(--ink);color:white;}
+  button.save{background:var(--n5);color:white;}
+  button.reset{background:#EEF1F3;color:var(--ink);}
+  .copied{color:var(--n5);font-size:.82rem;margin-left:4px;align-self:center;}
+
+  .saved-save-row{
+    display:flex;
+    flex-wrap:wrap;
+    gap:8px;
+    align-items:center;
+    margin-bottom:12px;
+  }
+  .saved-save-row input{
+    flex:1;
+    min-width:160px;
+    border:1px solid var(--line);
+    border-radius:8px;
+    padding:9px 12px;
+    font-size:.9rem;
+    font-family:inherit;
+  }
+  .saved-empty{color:var(--sub);font-size:.85rem;margin:4px 0;}
+  #saved-list{
+    display:grid !important;
+    grid-template-columns:repeat(auto-fit, minmax(max(100px, (100% - 12px)/3), 1fr));
+    gap:6px;
+    width:100%;
+  }
+  #saved-list .saved-empty{grid-column:1/-1;}
+  .saved-item{
+    position:relative;
+    border:1px solid #cfe3d6;
+    background:#EAF5EE;
+    border-radius:8px;
+    padding:8px 22px 8px 9px;
+    display:flex;
+    flex-direction:column;
+    gap:2px;
+    min-width:0;
+    cursor:pointer;
+    transition:background .12s, border-color .12s;
+  }
+  .saved-item:hover{background:#DCEEE3;border-color:#a9d2b8;}
+  .saved-item-x{
+    position:absolute;
+    top:2px;
+    right:4px;
+    border:none;
+    background:none;
+    color:var(--sub);
+    font-size:1.1rem;
+    line-height:1;
+    cursor:pointer;
+    padding:2px 4px;
+    border-radius:4px;
+  }
+  .saved-item-x:hover{background:#FBE9E7;color:#B3261E;}
+  .saved-item-name{font-weight:600;font-size:.82rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .saved-item-meta{color:var(--ink);font-size:.75rem;}
+  .saved-item-date{color:var(--sub);font-size:.68rem;}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Consegne di turno</h1>
+  <p>Seleziona i flag di ogni sezione: la consegna si compone qui sotto, in ordine, editabile a mano.</p>
+</header>
+
+<main>
+
+  <section class="card">
+    <h2 style="margin:0 0 12px;font-size:1.05rem;">Consegne salvate</h2>
+    <div id="saved-list"><p class="saved-empty">Caricamento...</p></div>
+  </section>
+
+  <section class="card">
+    <h2 style="margin:0 0 12px;font-size:1.05rem;">Dati paziente</h2>
+    <div class="group" style="margin-bottom:0;border-bottom:none;padding-bottom:0;">
+      <div class="flags">
+        <span class="inline-input">Letto <input type="text" id="letto-val" placeholder="n°" style="width:70px;"></span>
+        <span class="inline-input">Età <input type="number" id="eta-val" placeholder="anni" style="width:70px;"></span>
+        <span class="inline-group" data-group="sesso" data-mode="radio">
+        <span class="flag" data-text="M">M</span>
+        <span class="flag" data-text="F">F</span>
+        </span>
+      </div>
+    </div>
+  </section>
+
+  <!-- 1 - NEUROLOGICO -->
+  <section class="card s1" id="sec-1">
+    <h2><span class="badge">1</span>Neurologico</h2>
+
+    <div class="group" data-group="N-coscienza" data-mode="checkbox">
+      <div class="group-label">Stato di coscienza</div>
+      <div class="flags">
+        <span class="flag" data-text="vigile">Vigile</span>
+        <span class="flag" data-text="sedato">Sedato</span>
+        <span class="flag" data-text="soporoso">Soporoso</span>
+        <span class="flag" data-text="comatoso">Comatoso</span>
+      </div>
+    </div>
+
+    <div class="group" data-group="N-reattivita" data-mode="radio">
+      <div class="group-label">Reattività</div>
+      <div class="flags">
+        <span class="flag" data-text="reattivo alle manovre">Reattivo</span>
+        <span class="flag" data-text="scarsamente reattivo alle manovre">Scarsamente reattivo</span>
+        <span class="flag" data-text="non reattivo alle manovre">Non reattivo</span>
+      </div>
+    </div>
+
+    <div class="group" data-group="N-agitazione" data-mode="radio">
+      <div class="group-label">Agitazione</div>
+      <div class="flags">
+        <span class="flag" data-text="agitato a tratti" data-sub="N-consolabilita">Agitato a tratti</span>
+        <span class="flag" data-text="molto agitato" data-sub="N-consolabilita">Molto agitato</span>
+        <span class="flag" data-text="tranquillo">Tranquillo</span>
+      </div>
+      <div class="sub-flags" id="N-consolabilita" data-group="N-consolabilita" data-mode="radio">
+        <div class="sub-label">Consolabilità</div>
+        <div class="sub-flags-inner">
+        <span class="flag" data-text="ma consolabile">Consolabile</span>
+        <span class="flag" data-text="inconsolabile">Inconsolabile</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 2 - VENTILAZIONE -->
+  <section class="card s2" id="sec-2">
+    <h2><span class="badge">2</span>Ventilazione</h2>
+
+    <div class="group" data-group="V-supporto" data-mode="radio">
+      <div class="group-label">Supporto ventilatorio</div>
+      <div class="flags">
+        <span class="flag" data-text="respiro spontaneo, in aria ambiente" data-toggle="vent-params" data-toggle-show="false">Respiro spontaneo</span>
+        <span class="flag" data-text="in ossigenoterapia tramite occhialini nasali" data-toggle="occ-params" data-toggle-show="true">ON</span>
+        <span class="flag" data-text="in supporto ventilatorio non invasivo (NIV)" data-toggle="vent-params" data-toggle-show="true" data-sub="V-niv-device">NIV</span>
+        <span class="flag" data-text="in ventilazione meccanica invasiva" data-toggle="vent-params" data-toggle-show="true" data-sub="V-invasiva-via">Ventilazione invasiva</span>
+      </div>
+      <div class="sub-flags" id="V-niv-device" data-group="V-niv-device-sel" data-mode="radio">
+        <div class="sub-label">Tipo di supporto NIV</div>
+        <div class="sub-flags-inner">
+        <span class="flag" data-text="tramite Astral">Astral</span>
+        <span class="flag" data-text="tramite AIRVO">AIRVO</span>
+        <span class="flag" data-text="tramite Neoblend">Neoblend</span>
+        <span class="flag" data-text="tramite bubble CPAP">Bubble CPAP</span>
+        </div>
+      </div>
+      <div class="sub-flags" id="V-invasiva-via" data-group="V-invasiva-via-sel" data-mode="radio">
+        <div class="sub-label">Via aerea</div>
+        <div class="sub-flags-inner">
+        <span class="flag" data-text="tramite tracheostomia">Tracheostomia</span>
+        <span class="flag" data-text="tramite TOT">Tubo oro-tracheale (TOT)</span>
+        <span class="flag" data-text="tramite TRT">Tubo rino-tracheale (TRT)</span>
+        </div>
+      </div>
+      <div class="params-box" id="occ-params">
+        <span class="inline-input">Ossigeno <input type="number" id="o2-lmin-val" placeholder="L/min"></span>
+      </div>
+      <div class="params-box" id="vent-params">
+        <span class="inline-input vp-field" data-applies="astral,airvo,neoblend,bubble,invasiva">FiO2 <input type="number" id="fio2-val" placeholder="%"></span>
+        <span class="inline-input vp-field" data-applies="astral,bubble,invasiva">PEEP <input type="number" id="peep-val" placeholder="cmH2O"></span>
+        <span class="inline-input vp-field" data-applies="astral,invasiva">Sopra PEEP <input type="number" id="sopra-peep-val" placeholder="cmH2O"></span>
+        <span class="inline-input vp-field" data-applies="airvo,neoblend,bubble">Flusso <input type="number" id="flusso-val" placeholder="L/min"> L/min</span>
+        <span class="inline-input vp-field" data-applies="invasiva">Atti <input type="number" id="atti-val" placeholder="/min"></span>
+        <span class="inline-input vp-field" data-applies="astral,invasiva">Modalità <input type="text" class="wide" id="modalita-val" placeholder="es. PC, SIMV, PS..."></span>
+      </div>
+    </div>
+
+    <div class="group" data-group="V-spo2" data-mode="radio">
+      <div class="group-label">Saturazione</div>
+      <div class="flags">
+        <span class="flag" data-text="mantiene discrete saturazioni">Discreta</span>
+        <span class="flag" data-text="mantiene buone saturazioni">Buona</span>
+        <span class="flag" data-text="mantiene ottime saturazioni">Ottima</span>
+      </div>
+    </div>
+
+    <div class="group" data-group="V-secrezioni" data-mode="radio">
+      <div class="group-label">Secrezioni</div>
+      <div class="flags">
+        <span class="flag" data-text="secrezioni assenti">Assenti</span>
+        <span class="flag" data-text="secrezioni scarse" data-sub="V-aspetto">Scarse</span>
+        <span class="flag" data-text="secrezioni abbondanti" data-sub="V-aspetto">Abbondanti</span>
+      </div>
+      <div class="sub-flags" id="V-aspetto" data-group="V-aspetto-sel" data-mode="checkbox">
+        <div class="sub-label">Aspetto secrezioni</div>
+        <div class="sub-flags-inner">
+        <span class="flag" data-text="biancastre">Biancastre</span>
+        <span class="flag" data-text="giallastre">Giallastre</span>
+        <span class="flag" data-text="dense">Dense</span>
+        <span class="flag" data-text="fluide">Fluide</span>
+        <span class="flag" data-text="semifluide">Semifluide</span>
+        <span class="flag" data-text="ematiche">Ematiche</span>
+        <span class="flag" data-text="schiumose">Schiumose</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="group" data-group="V-scialorrea" data-mode="checkbox">
+      <div class="flags">
+        <span class="flag" data-text="scialorrea presente">Scialorrea</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3 - CIRCOLO -->
+  <section class="card s3" id="sec-3">
+    <h2><span class="badge">3</span>Circolo</h2>
+
+    <div class="group" data-group="C-stato" data-mode="radio">
+      <div class="group-label">Stato emodinamico</div>
+      <div class="flags">
+        <span class="inline-group" data-group="C-stato" data-mode="radio">
+        <span class="flag" data-text="stabile" data-sub="C-catetere-arterioso">Stabile</span>
+        <span class="flag" data-text="instabile" data-sub="C-catetere-arterioso">Instabile</span>
+        </span>
+        <span class="inline-group" data-group="C-amine" data-mode="checkbox">
+        <span class="flag" data-text="con ammine">Con ammine</span>
+        </span>
+      </div>
+      <div class="sub-flags" id="C-catetere-arterioso" data-group="C-catetere-arterioso" data-mode="radio">
+        <div class="sub-label">Catetere arterioso</div>
+        <div class="sub-flags-inner">
+        <span class="flag" data-text="presente">Presente</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="group" data-group="C-cute" data-mode="radio">
+      <div class="group-label">Cute e perfusione</div>
+      <div class="flags">
+        <span class="flag" data-text="cute normo-perfusa">Normo-perfusa</span>
+        <span class="flag" data-text="cute pallida">Pallida</span>
+        <span class="flag" data-text="cute marezzata">Marezzata</span>
+        <span class="flag" data-text="cute cianotica">Cianotica</span>
+      </div>
+    </div>
+
+    <div class="group" data-group="C-temp" data-mode="radio">
+      <div class="group-label">Temperatura</div>
+      <div class="flags">
+        <span class="flag" data-text="apiretico">Apiretico</span>
+        <span class="flag" data-text="febbrile">Febbrile</span>
+        <span class="flag" data-text="ipotermico">Ipotermico</span>
+        <span class="inline-input"><input type="text" id="temp-val" placeholder="°C"></span>
+      </div>
+    </div>
+  </section>
+
+  <!-- 4 - DIURESI, ALIMENTAZIONE, ALVO -->
+  <section class="card s4" id="sec-4">
+    <h2><span class="badge">4</span>Diuresi, alimentazione, alvo</h2>
+
+    <div class="group" data-group="U-diuresi" data-mode="radio">
+      <div class="group-label">Diuresi</div>
+      <div class="flags">
+        <span class="inline-group" data-group="U-diuresi" data-mode="radio">
+        <span class="flag" data-text="diuresi valida nel catetere vescicale" data-sub="U-urine U-quantita">Catetere vescicale</span>
+        <span class="flag" data-text="diuresi valida nel pannolino" data-sub="U-urine U-quantita">Spontanea</span>
+        </span>
+        <span class="inline-group" data-group="U-lasix" data-mode="checkbox">
+        <span class="flag" data-text="in terapia con Lasix">Lasix</span>
+        </span>
+      </div>
+      <div class="sub-flags" id="U-urine" data-group="U-urine" data-mode="radio">
+        <div class="sub-label">Aspetto urine</div>
+        <div class="sub-flags-inner">
+        <span class="flag" data-text="urine chiare">Chiare</span>
+        <span class="flag" data-text="urine concentrate">Concentrate</span>
+        <span class="flag" data-text="urine ematiche">Ematiche</span>
+        <span class="flag" data-text="urine torbide">Torbide</span>
+        </div>
+      </div>
+      <div class="sub-flags" id="U-quantita" data-group="U-quantita" data-mode="radio">
+        <div class="sub-label">Quantità urine</div>
+        <div class="sub-flags-inner">
+        <span class="flag" data-text="abbondante">Abbondante</span>
+        <span class="flag" data-text="scarsa">Scarsa</span>
+        <span class="flag" data-text="contratta">Contratta</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="group" data-group="U-alimentazione" data-mode="radio">
+      <div class="group-label">Alimentazione</div>
+      <div class="flags">
+        <span class="flag" data-text="a digiuno">A digiuno</span>
+        <span class="flag" data-text="in nutrizione enterale">Enterale</span>
+        <span class="flag" data-text="in nutrizione parenterale">Parenterale</span>
+        <span class="flag" data-text="alimentazione per via orale">Per os</span>
+      </div>
+    </div>
+
+    <div class="group" data-group="U-via-enterale-sel" data-mode="radio">
+      <div class="group-label">Accesso digestivo (SNG / gastrostomia)</div>
+      <div class="flags">
+        <span class="flag" data-text="tramite SNG" data-sub="U-via-stato U-ristagno">SNG</span>
+        <span class="flag" data-text="tramite gastrostomia" data-sub="U-via-stato U-ristagno">Gastrostomia</span>
+      </div>
+      <div class="sub-flags" id="U-via-stato" data-group="U-via-stato-sel" data-mode="radio">
+        <div class="sub-label">Stato</div>
+        <div class="sub-flags-inner">
+        <span class="flag" data-text="chiuso">Chiuso</span>
+        <span class="flag" data-text="a caduta">A caduta</span>
+        </div>
+      </div>
+      <div class="sub-flags" id="U-ristagno" data-group="U-ristagno-sel" data-mode="radio">
+        <div class="sub-label">Ristagno</div>
+        <div class="sub-flags-inner">
+        <span class="flag" data-text="ristagno alimentare">Alimentare</span>
+        <span class="flag" data-text="ristagno biliare">Biliare</span>
+        <span class="flag" data-text="ristagno ematico">Ematico</span>
+        <span class="inline-input">quantità <input type="text" id="ristagno-qta-val" placeholder="ml"></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="group" data-group="U-alvo" data-mode="radio">
+      <div class="group-label">Alvo</div>
+      <div class="flags">
+        <span class="flag" data-text="alvo negativo">Negativo</span>
+        <span class="flag" data-text="alvo positivo" data-sub="U-feci">Positivo</span>
+      </div>
+      <div class="sub-flags" id="U-feci" data-group="U-feci-sel" data-mode="checkbox">
+        <div class="sub-label">Caratteristiche feci</div>
+        <div class="sub-flags-inner">
+        <span class="flag" data-text="feci formate">Formate</span>
+        <span class="flag" data-text="feci semiliquide">Semiliquide</span>
+        <span class="flag" data-text="feci liquide">Liquide</span>
+        <span class="flag" data-text="feci biliari">Biliari</span>
+        <span class="flag" data-text="feci da latte">Da latte</span>
+        <span class="flag" data-text="presenza di muco">Con muco</span>
+        <span class="flag" data-text="presenza di sangue">Con sangue</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 5 - DRENAGGI -->
+  <section class="card s5" id="sec-5">
+    <h2><span class="badge">5</span>Drenaggi</h2>
+
+    <div class="group" data-group="AC-drenaggi" data-mode="checkbox">
+      <div class="group-label">Drenaggi presenti</div>
+      <div class="flags">
+        <span class="flag" data-text="toracico" data-sub="dren-toracico">Toracico</span>
+        <span class="flag" data-text="addominale" data-sub="dren-addominale">Addominale</span>
+        <span class="flag" data-text="cranico" data-sub="dren-cranico">Cranico</span>
+        <span class="flag" data-text="altro" data-sub="dren-altro">Altro</span>
+      </div>
+
+      <div class="sub-flags dren-detail" id="dren-toracico">
+        <div class="sub-label">Drenaggio toracico</div>
+        <div class="mini-group" data-group="AC-tor-aspirazione" data-mode="radio">
+          <div class="sub-flags-inner">
+          <span class="flag" data-text="in aspirazione">In aspirazione</span>
+          <span class="flag" data-text="a caduta">A caduta</span>
+          <span class="inline-input">a <input type="text" id="tor-asp-val" placeholder="cmH2O"></span>
+          </div>
+        </div>
+        <div class="mini-group" data-group="AC-tor-drenato" data-mode="checkbox">
+          <div class="sub-flags-inner">
+          <span class="flag" data-text="sieroso">Sieroso</span>
+          <span class="flag" data-text="ematico">Ematico</span>
+          <span class="flag" data-text="purulento">Purulento</span>
+          <span class="inline-input">quantità <input type="text" id="tor-qta-val" placeholder="ml/24h"></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="sub-flags dren-detail" id="dren-addominale">
+        <div class="sub-label">Drenaggio addominale</div>
+        <div class="mini-group" data-group="AC-add-aspirazione" data-mode="radio">
+          <div class="sub-flags-inner">
+          <span class="flag" data-text="in aspirazione">In aspirazione</span>
+          <span class="flag" data-text="a caduta">A caduta</span>
+          <span class="inline-input">a <input type="text" id="add-asp-val" placeholder="cmH2O"></span>
+          </div>
+        </div>
+        <div class="mini-group" data-group="AC-add-drenato" data-mode="checkbox">
+          <div class="sub-flags-inner">
+          <span class="flag" data-text="sieroso">Sieroso</span>
+          <span class="flag" data-text="ematico">Ematico</span>
+          <span class="flag" data-text="purulento">Purulento</span>
+          <span class="inline-input">quantità <input type="text" id="add-qta-val" placeholder="ml/24h"></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="sub-flags dren-detail" id="dren-cranico">
+        <div class="sub-label">Drenaggio cranico</div>
+        <div class="mini-group" data-group="AC-cra-aspirazione" data-mode="radio">
+          <div class="sub-flags-inner">
+          <span class="flag" data-text="in aspirazione">In aspirazione</span>
+          <span class="flag" data-text="a caduta">A caduta</span>
+          <span class="inline-input">a <input type="text" id="cra-asp-val" placeholder="cmH2O"></span>
+          </div>
+        </div>
+        <div class="mini-group" data-group="AC-cra-drenato" data-mode="checkbox">
+          <div class="sub-flags-inner">
+          <span class="flag" data-text="sieroso">Sieroso</span>
+          <span class="flag" data-text="ematico">Ematico</span>
+          <span class="flag" data-text="purulento">Purulento</span>
+          <span class="inline-input">quantità <input type="text" id="cra-qta-val" placeholder="ml/24h"></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="sub-flags dren-detail" id="dren-altro">
+        <div class="sub-label">Altro drenaggio</div>
+        <div class="mini-group">
+          <div class="sub-flags-inner">
+          <span class="inline-input">sede <input type="text" class="wide" id="altro-sede-val" placeholder="es. pleurico dx"></span>
+          </div>
+        </div>
+        <div class="mini-group" data-group="AC-alt-aspirazione" data-mode="radio">
+          <div class="sub-flags-inner">
+          <span class="flag" data-text="in aspirazione">In aspirazione</span>
+          <span class="flag" data-text="a caduta">A caduta</span>
+          <span class="inline-input">a <input type="text" id="alt-asp-val" placeholder="cmH2O"></span>
+          </div>
+        </div>
+        <div class="mini-group" data-group="AC-alt-drenato" data-mode="checkbox">
+          <div class="sub-flags-inner">
+          <span class="flag" data-text="sieroso">Sieroso</span>
+          <span class="flag" data-text="ematico">Ematico</span>
+          <span class="flag" data-text="purulento">Purulento</span>
+          <span class="inline-input">quantità <input type="text" id="alt-qta-val" placeholder="ml/24h"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 6 - ATTIVITÀ DI TURNO -->
+  <section class="card s6" id="sec-6">
+    <h2><span class="badge">6</span>Attività di turno</h2>
+
+    <div class="group" data-group="T-medicazione-dispositivi" data-mode="checkbox">
+      <div class="group-label">Medicazione dispositivi eseguita</div>
+      <div class="flags">
+        <span class="flag" data-text="CVC">CVC</span>
+        <span class="flag" data-text="linea arteriosa">Arterioso</span>
+        <span class="flag" data-text="tracheostomia">Tracheostomia</span>
+        <span class="flag" data-text="gastrostomia">Gastrostomia</span>
+      </div>
+    </div>
+
+    <div class="group" data-group="T-esami" data-mode="checkbox">
+      <div class="group-label">Esami eseguiti</div>
+      <div class="flags">
+        <span class="flag" data-text="eseguiti prelievi ematici">Prelievi ematici</span>
+        <span class="flag" data-text="eseguita emogasanalisi di controllo">Emogasanalisi di controllo</span>
+        <span class="flag" data-text="fibroscopia">Fibroscopia</span>
+        <span class="flag" data-text="RX">RX</span>
+        <span class="flag" data-text="TAC">TAC</span>
+        <span class="flag" data-text="risonanza magnetica">Risonanza magnetica</span>
+      </div>
+    </div>
+
+    <div class="group" data-group="T-assistenza" data-mode="checkbox">
+      <div class="group-label">Assistenza eseguita</div>
+      <div class="flags">
+        <span class="flag" data-text="eseguita igiene a letto">Igiene a letto</span>
+        <span class="flag" data-text="posturato">Paziente posturato</span>
+        <span class="flag" data-text="eseguiti cambi linea">Cambi linea eseguiti</span>
+        <span class="flag" data-text="eseguito cambio linea arteria">Cambio linea arteria</span>
+        <span class="flag" data-text="terapia somministrata come da schema">Terapia come da schema</span>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<div class="output-wrap collapsed" id="output-wrap">
+  <div class="output-header" onclick="toggleOutput()">
+    <h2>Consegna generata</h2>
+    <button class="toggle-btn" id="toggle-btn" type="button">Mostra ▲</button>
+  </div>
+  <div class="output-body" id="output-body">
+    <textarea id="output"></textarea>
+    <div class="actions">
+      <button class="act copy" onclick="copyOutput()">Copia</button>
+      <button class="act save" onclick="saveConsegna()">Salva questa consegna</button>
+      <button class="act reset" onclick="resetAll()">Azzera tutto</button>
+      <span class="copied" id="copied-msg" style="display:none;">Copiato ✓</span>
+      <span class="copied" id="saved-msg" style="display:none;">Salvata ✓</span>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script>
+const sb = window.supabase.createClient(
+  'https://kxqrtdlbqyhqaumvlafu.supabase.co',
+  'sb_publishable_3Twp4s3IEtLu5EOtJ4bW-g_J4xoSErd'
+);
+
+const state = {};
+let manualEdit = false;
+
+document.querySelectorAll('.flag').forEach(flag => {
+  flag.addEventListener('click', () => {
+    const group = flag.closest('.group, .sub-flags, .inline-group, .mini-group');
+    const groupName = group.dataset.group;
+    const mode = group.dataset.mode;
+
+    if(!state[groupName]) state[groupName] = [];
+
+    if(mode === 'radio'){
+      const isOn = flag.classList.contains('on');
+      // solo i flag dello stesso gruppo (non delle sottocategorie annidate) vengono deselezionati
+      group.querySelectorAll('.flag').forEach(f => {
+        if(f.closest('.group, .sub-flags, .inline-group, .mini-group') === group) f.classList.remove('on');
+      });
+      if(!isOn){
+        flag.classList.add('on');
+        state[groupName] = [flag.dataset.text];
+      } else {
+        state[groupName] = [];
+      }
+    } else {
+      flag.classList.toggle('on');
+      // l'ordine riflette la posizione dei flag nel form, non l'ordine di click
+      state[groupName] = [...group.querySelectorAll('.flag')]
+        .filter(f => f.closest('.group, .sub-flags, .inline-group, .mini-group') === group && f.classList.contains('on'))
+        .map(f => f.dataset.text);
+    }
+
+    // sub-flags visibility (secrezioni -> aspetto, etc.) — re-evaluated for the whole group
+    // every click, so a flag that gets deselected (e.g. switching radio choice) also
+    // hides its own sub-category, not just the flag that was just clicked.
+    {
+      const subIds = new Set();
+      group.querySelectorAll('.flag[data-sub]').forEach(f => {
+        f.dataset.sub.split(' ').forEach(id => subIds.add(id));
+      });
+      subIds.forEach(subId => {
+        const subEl = document.getElementById(subId);
+        if(!subEl) return;
+        const anyOn = [...group.querySelectorAll('.flag[data-sub]')].some(f => f.dataset.sub.split(' ').includes(subId) && f.classList.contains('on'));
+        if(anyOn){
+          subEl.classList.add('show');
+        } else if(subEl.classList.contains('show')){
+          subEl.classList.remove('show');
+          if(subEl.dataset.group) state[subEl.dataset.group] = [];
+          subEl.querySelectorAll('[data-group]').forEach(el => {
+            if(el.dataset.group) state[el.dataset.group] = [];
+          });
+          subEl.querySelectorAll('.flag').forEach(f => f.classList.remove('on'));
+        }
+      });
+    }
+
+    // params-box toggle (ventilazione)
+    if(flag.dataset.toggle){
+      const target = document.getElementById(flag.dataset.toggle);
+      if(flag.classList.contains('on') && flag.dataset.toggleShow === 'true'){
+        target.classList.add('show');
+      } else if(flag.classList.contains('on') && flag.dataset.toggleShow === 'false'){
+        target.classList.remove('show');
+      }
+    }
+
+    // occhialini nasali have their own O2 L/min field; other supports show only the
+    // parameters relevant to that specific device (NIV device or invasiva)
+    if(groupName === 'V-supporto' || groupName === 'V-niv-device-sel'){
+      updateVentParamsVisibility();
+    }
+
+    manualEdit = false;
+    render();
+  });
+});
+
+['fio2-val','peep-val','sopra-peep-val','atti-val','modalita-val','o2-lmin-val','eta-val','flusso-val',
+ 'temp-val','ristagno-qta-val','altro-sede-val',
+ 'tor-asp-val','tor-qta-val','add-asp-val','add-qta-val','cra-asp-val','cra-qta-val','alt-asp-val','alt-qta-val'].forEach(id => {
+  const el = document.getElementById(id);
+  if(el) el.addEventListener('input', () => { manualEdit = false; render(); });
+});
+
+function joinPhrases(arr, sep=', '){
+  return arr.filter(Boolean).join(sep);
+}
+function joinItalian(arr){
+  const a = arr.filter(Boolean);
+  if(a.length === 0) return '';
+  if(a.length === 1) return a[0];
+  return a.slice(0, -1).join(', ') + ' e ' + a[a.length - 1];
+}
+
+function ageOpeningWord(eta, sesso){
+  const n = parseFloat(eta);
+  if(isNaN(n)) return '';
+  const isF = sesso === 'F';
+  if(n <= 1) return isF ? 'Piccola' : 'Piccolo';
+  if(n <= 5) return isF ? 'Bimba' : 'Bimbo';
+  if(n <= 14) return isF ? 'Bambina' : 'Bambino';
+  if(n <= 20) return isF ? 'Ragazza' : 'Ragazzo';
+  return 'Paziente';
+}
+
+function feminizeWord(str, masc, fem){
+  const re = new RegExp('\\b' + masc + '\\b', 'gi');
+  return str.replace(re, (match) => {
+    if(match[0] === match[0].toUpperCase()) return fem.charAt(0).toUpperCase() + fem.slice(1);
+    return fem;
+  });
+}
+
+function feminizeText(text){
+  const pairs = [
+    ['scarsamente reattivo', 'scarsamente reattiva'],
+    ['non reattivo', 'non reattiva'],
+    ['reattivo', 'reattiva'],
+    ['molto agitato', 'molto agitata'],
+    ['agitato a tratti', 'agitata a tratti'],
+    ['ventilato', 'ventilata'],
+    ['tranquillo', 'tranquilla'],
+    ['semi-sedato', 'semi-sedata'],
+    ['sedato', 'sedata'],
+    ['soporoso', 'soporosa'],
+    ['comatoso', 'comatosa'],
+    ['posturato', 'posturata'],
+    ['apiretico', 'apiretica'],
+    ['ipotermico', 'ipotermica'],
+    ['bronco-aspirato', 'bronco-aspirata'],
+  ];
+  let result = text;
+  pairs.forEach(([m, f]) => { result = feminizeWord(result, m, f); });
+  return result;
+}
+function capitalize(s){
+  if(!s) return s;
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+function capitalizeSentences(s){
+  if(!s) return s;
+  return s.replace(/(^|[.!?]\s+)([a-zàèéìòù])/g, (m, sep, ch) => sep + ch.toUpperCase());
+}
+
+function currentDeviceKey(){
+  const supp = state['V-supporto'] && state['V-supporto'][0];
+  if(!supp) return null;
+  if(supp.indexOf('occhialini') !== -1) return 'occhialini';
+  if(supp.indexOf('respiro spontaneo') !== -1) return null;
+  if(supp.indexOf('ventilazione meccanica invasiva') !== -1) return 'invasiva';
+  const device = state['V-niv-device-sel'] && state['V-niv-device-sel'][0];
+  if(device === 'tramite Astral') return 'astral';
+  if(device === 'tramite AIRVO') return 'airvo';
+  if(device === 'tramite Neoblend') return 'neoblend';
+  if(device === 'tramite bubble CPAP') return 'bubble';
+  return 'niv-generic';
+}
+
+function updateVentParamsVisibility(){
+  const key = currentDeviceKey();
+  const occBox = document.getElementById('occ-params');
+  const ventBox = document.getElementById('vent-params');
+  if(key === 'occhialini'){
+    occBox.classList.add('show');
+    ventBox.classList.remove('show');
+    return;
+  }
+  occBox.classList.remove('show');
+  if(!key || key === 'niv-generic'){
+    ventBox.classList.remove('show');
+    return;
+  }
+  ventBox.classList.add('show');
+  ventBox.querySelectorAll('.vp-field').forEach(f => {
+    const applies = f.dataset.applies.split(',');
+    f.style.display = applies.includes(key) ? '' : 'none';
+  });
+}
+
+function render(){
+  if(manualEdit) return;
+
+  const lines = [];
+
+  // 1 - Neurologico
+  let nParts = [];
+  if(state['N-coscienza'] && state['N-coscienza'].length){
+    let coscienzaArr = state['N-coscienza'].slice();
+    if(coscienzaArr.includes('vigile') && coscienzaArr.includes('sedato')){
+      coscienzaArr = coscienzaArr.filter(t => t !== 'sedato');
+      coscienzaArr = coscienzaArr.map(t => t === 'vigile' ? 'vigile' : t);
+      coscienzaArr.unshift('semi-sedato');
+    }
+    nParts.push(joinPhrases(coscienzaArr));
+  }
+  if(state['N-reattivita'] && state['N-reattivita'][0]) nParts.push(state['N-reattivita'][0]);
+  if(state['N-agitazione'] && state['N-agitazione'][0]) nParts.push(state['N-agitazione'][0]);
+  if(state['N-consolabilita'] && state['N-consolabilita'][0]) nParts.push(state['N-consolabilita'][0]);
+  if(nParts.length) lines.push(capitalize(joinPhrases(nParts, ', ')) + '.');
+
+  // 2 - Ventilazione
+  let vParts = [];
+
+  let vSupporto = state['V-supporto'] && state['V-supporto'][0];
+  if(vSupporto){
+    if(vSupporto.indexOf('respiro spontaneo') === -1){
+      let deviceTxt = state['V-niv-device-sel'] && state['V-niv-device-sel'][0];
+      let viaTxt = state['V-invasiva-via-sel'] && state['V-invasiva-via-sel'][0];
+      let paramBits = [];
+      if(vSupporto.indexOf('occhialini') !== -1){
+        const o2lmin = document.getElementById('o2-lmin-val').value;
+        if(o2lmin) paramBits.push(`O2 ${o2lmin} L/min`);
+      } else {
+        const key = currentDeviceKey();
+        const applies = {
+          astral: ['fio2', 'peep', 'sopraPeep', 'modalita'],
+          airvo: ['fio2', 'flusso'],
+          neoblend: ['fio2', 'flusso'],
+          bubble: ['fio2', 'peep', 'flusso'],
+          invasiva: ['fio2', 'peep', 'sopraPeep', 'atti', 'modalita']
+        }[key] || [];
+        const fio2 = document.getElementById('fio2-val').value;
+        const peep = document.getElementById('peep-val').value;
+        const sopraPeep = document.getElementById('sopra-peep-val').value;
+        const flusso = document.getElementById('flusso-val').value;
+        const atti = document.getElementById('atti-val').value;
+        const modalita = document.getElementById('modalita-val').value;
+        if(applies.includes('fio2') && fio2) paramBits.push(`FiO2 ${fio2}%`);
+        if(applies.includes('peep') && peep && applies.includes('sopraPeep') && sopraPeep){
+          paramBits.push(`PEEP ${peep}+${sopraPeep} cmH2O`);
+        } else {
+          if(applies.includes('peep') && peep) paramBits.push(`PEEP ${peep} cmH2O`);
+          if(applies.includes('sopraPeep') && sopraPeep) paramBits.push(`sopra PEEP ${sopraPeep} cmH2O`);
+        }
+        if(applies.includes('flusso') && flusso) paramBits.push(`flusso ${flusso} L/min`);
+        if(applies.includes('atti') && atti) paramBits.push(`atti ${atti}/min`);
+      }
+      const modeVal = (currentDeviceKey() === 'astral' || currentDeviceKey() === 'invasiva') ? document.getElementById('modalita-val').value.trim() : '';
+      let extraTxt = deviceTxt || viaTxt;
+      let supTxt;
+      if(vSupporto.indexOf('occhialini') !== -1){
+        supTxt = vSupporto;
+      } else if(extraTxt){
+        supTxt = 'ventilato' + (modeVal ? ` in ${modeVal}` : '') + ' ' + extraTxt;
+      } else {
+        supTxt = vSupporto;
+      }
+      vParts.push(supTxt + (paramBits.length ? ` (${paramBits.join(', ')})` : ''));
+    } else {
+      vParts.push(vSupporto);
+    }
+  }
+
+  let vSpo2 = state['V-spo2'] && state['V-spo2'][0];
+  if(vSpo2) vParts.push(vSpo2);
+
+  let vSecr = state['V-secrezioni'] && state['V-secrezioni'][0];
+  if(vSecr){
+    let secrBits = [];
+    if(vSecr === 'secrezioni scarse' || vSecr === 'secrezioni abbondanti'){
+      secrBits.push('bronco-aspirato al bisogno');
+    }
+    secrBits.push(vSecr);
+    let vAspettoArr = state['V-aspetto-sel'] || [];
+    if(vAspettoArr.length){
+      const viscosita = ['dense', 'fluide', 'semifluide', 'schiumose'];
+      const ordered = vAspettoArr.slice().sort((a, b) => {
+        const ai = viscosita.includes(a) ? 0 : 1;
+        const bi = viscosita.includes(b) ? 0 : 1;
+        return ai - bi;
+      });
+      secrBits.push(joinItalian(ordered));
+    }
+    vParts.push(secrBits.join(', '));
+  }
+
+  if(state['V-scialorrea'] && state['V-scialorrea'].length){
+    vParts.push('presenta abbondante scialorrea');
+  }
+
+  if(vParts.length) lines.push(capitalize(joinPhrases(vParts, '. ')) + '.');
+
+  // 3 - Circolo
+  let cParts = [];
+  let cStatoWord = state['C-stato'] && state['C-stato'][0];
+  let hasAmine = state['C-amine'] && state['C-amine'].length;
+  if(cStatoWord){
+    const hasArteria = state['C-catetere-arterioso'] && state['C-catetere-arterioso'][0] === 'presente';
+    const prefix = hasArteria ? 'emodinamica' : 'pressione arteriosa';
+    let stateTxt = `${prefix} ${cStatoWord}`;
+    if(hasAmine) stateTxt += ', sostenuta da ammine';
+    cParts.push(stateTxt);
+  } else if(hasAmine){
+    cParts.push('sostenuta da ammine');
+  }
+  if(state['C-cute'] && state['C-cute'][0]) cParts.push(state['C-cute'][0]);
+  let cTemp = state['C-temp'] && state['C-temp'][0];
+  const tempVal = document.getElementById('temp-val').value;
+  if(cTemp === 'apiretico'){
+    cParts.push('apiretico');
+  } else if(cTemp){
+    cParts.push(tempVal ? `${cTemp}, TC ${tempVal}°C` : cTemp);
+  } else if(tempVal){
+    cParts.push(`TC ${tempVal}°C`);
+  }
+  if(cParts.length) lines.push(capitalize(joinPhrases(cParts, '. ')) + '.');
+
+  // 4 - Diuresi, alimentazione, alvo
+  let uParts = [];
+  let uDiuresi = state['U-diuresi'] && state['U-diuresi'][0];
+  let uUrine = state['U-urine'] && state['U-urine'][0];
+  let uQuantita = state['U-quantita'] && state['U-quantita'][0];
+  if(uDiuresi){
+    let diuresiTxt = uDiuresi;
+    if(state['U-lasix'] && state['U-lasix'].length) diuresiTxt += ', stimolata da Lasix';
+    let urineBits = [uQuantita, uUrine].filter(Boolean);
+    if(urineBits.length) diuresiTxt += ', ' + urineBits.join(', ');
+    uParts.push(diuresiTxt);
+  } else if(state['U-lasix'] && state['U-lasix'].length){
+    uParts.push('in terapia con Lasix');
+  }
+
+  let uAlim = state['U-alimentazione'] && state['U-alimentazione'][0];
+  let uVia = state['U-via-enterale-sel'] && state['U-via-enterale-sel'][0];
+  const hasDeviceForRistagno = uVia === 'tramite SNG' || uVia === 'tramite gastrostomia';
+  let uViaStato = hasDeviceForRistagno ? (state['U-via-stato-sel'] && state['U-via-stato-sel'][0]) : '';
+  if(uViaStato === 'chiuso' && uVia === 'tramite gastrostomia') uViaStato = 'chiusa';
+  const ristagnoTxt = hasDeviceForRistagno ? (state['U-ristagno-sel'] && state['U-ristagno-sel'][0]) : '';
+  const viaMentionedInAlim = uAlim === 'in nutrizione enterale' && !!uVia;
+  const deviceLabel = uVia === 'tramite SNG' ? 'SNG' : 'gastrostomia';
+  const devicePrep = uVia === 'tramite SNG' ? 'dal SNG' : 'dalla gastrostomia';
+
+  const ristagnoQta = document.getElementById('ristagno-qta-val').value;
+  const ristagnoQtySuffix = ristagnoQta ? ` (${ristagnoQta} ml)` : '';
+
+  if(uAlim){
+    let alimTxt = viaMentionedInAlim ? `${uAlim} ${uVia}` : uAlim;
+    if(viaMentionedInAlim){
+      // stato e ristagno dell'accesso, se presenti, restano nella stessa frase
+      // della nutrizione enterale (il dispositivo è già nominato qui)
+      const extraBits = [];
+      if(uViaStato) extraBits.push(uViaStato);
+      extraBits.push(ristagnoTxt ? ('presente ' + ristagnoTxt + ristagnoQtySuffix) : 'ben tollerata');
+      alimTxt += ', ' + extraBits.join(', ');
+    }
+    uParts.push(alimTxt);
+  }
+
+  // stato (chiuso/a caduta) e ristagno quando l'accesso digestivo non è legato
+  // alla nutrizione enterale (es. a digiuno, per os, nessuna alimentazione selezionata)
+  if(uVia && !viaMentionedInAlim){
+    let accessoTxt;
+    if(uViaStato){
+      const ristagnoPart = ristagnoTxt ? ('presenta ' + ristagnoTxt + ristagnoQtySuffix) : '';
+      accessoTxt = [`${deviceLabel} ${uViaStato}`, ristagnoPart].filter(Boolean).join(', ');
+    } else if(ristagnoTxt){
+      accessoTxt = 'presenta ' + ristagnoTxt + ` ${devicePrep}` + ristagnoQtySuffix;
+    } else {
+      accessoTxt = `${deviceLabel} in sede`;
+    }
+    uParts.push(accessoTxt);
+  }
+
+  let uAlvo = state['U-alvo'] && state['U-alvo'][0];
+  if(uAlvo){
+    let feciArr = state['U-feci-sel'] || [];
+    const consistenza = feciArr.filter(t => t.startsWith('feci ')).map(t => t.slice(5));
+    const altro = feciArr.filter(t => !t.startsWith('feci '));
+    const feciBits = [];
+    if(consistenza.length) feciBits.push('feci ' + joinItalian(consistenza));
+    feciBits.push(...altro);
+    uParts.push(feciBits.length ? `${uAlvo}, ${joinPhrases(feciBits)}` : uAlvo);
+  }
+
+  if(uParts.length) lines.push(capitalize(joinPhrases(uParts, '. ')) + '.');
+
+  // 5 - Drenaggi (each selected drain has its own independent detail)
+  let acParts = [];
+  const drenConfig = {
+    toracico:   { label: 'drenaggio toracico',   asp: 'AC-tor-aspirazione', dren: 'AC-tor-drenato', aspId: 'tor-asp-val', qtaId: 'tor-qta-val' },
+    addominale: { label: 'drenaggio addominale', asp: 'AC-add-aspirazione', dren: 'AC-add-drenato', aspId: 'add-asp-val', qtaId: 'add-qta-val' },
+    cranico:    { label: 'drenaggio cranico',    asp: 'AC-cra-aspirazione', dren: 'AC-cra-drenato', aspId: 'cra-asp-val', qtaId: 'cra-qta-val' }
+  };
+  function buildDrenaggio(label, aspGroup, drenGroup, aspInputId, qtaInputId){
+    let materialeTxt = '';
+    let drenatoArr = (state[drenGroup] || []).slice();
+    if(drenatoArr.length){
+      let combined = drenatoArr.slice();
+      if(combined.includes('sieroso') && combined.includes('ematico')){
+        combined = combined.filter(t => t !== 'sieroso' && t !== 'ematico');
+        combined.unshift('siero-ematico');
+      }
+      materialeTxt = joinItalian(combined);
+    }
+    let aspirazioneTxt = state[aspGroup] && state[aspGroup][0];
+    const aspVal = document.getElementById(aspInputId) ? document.getElementById(aspInputId).value : '';
+    let aspirazioneFull = '';
+    if(aspirazioneTxt === 'in aspirazione'){
+      aspirazioneFull = 'in aspirazione' + (aspVal ? ` a -${aspVal} cmH2O` : '');
+    } else if(aspirazioneTxt){
+      aspirazioneFull = aspirazioneTxt;
+    }
+    const qtaVal = document.getElementById(qtaInputId) ? document.getElementById(qtaInputId).value : '';
+    const hasDetail = aspirazioneFull || qtaVal || materialeTxt;
+    let str = hasDetail ? label : label + ' in sede';
+    if(aspirazioneFull) str += `, ${aspirazioneFull}`;
+    if(qtaVal){
+      str += `, ha drenato circa ${qtaVal}ml di materiale` + (materialeTxt ? ` ${materialeTxt}` : '');
+    } else if(materialeTxt){
+      str += `, drenato ${materialeTxt}`;
+    }
+    return str;
+  }
+
+  (state['AC-drenaggi'] || []).forEach(d => {
+    if(d === 'altro'){
+      const sede = document.getElementById('altro-sede-val') ? document.getElementById('altro-sede-val').value.trim() : '';
+      const label = sede ? `drenaggio ${sede}` : 'drenaggio';
+      acParts.push(buildDrenaggio(label, 'AC-alt-aspirazione', 'AC-alt-drenato', 'alt-asp-val', 'alt-qta-val'));
+    } else if(drenConfig[d]){
+      const cfg = drenConfig[d];
+      acParts.push(buildDrenaggio(cfg.label, cfg.asp, cfg.dren, cfg.aspId, cfg.qtaId));
+    }
+  });
+
+  if(acParts.length) lines.push(capitalize(acParts.map(p => p + '.').join(' ')));
+
+  // 6 - Attività di turno
+  let tParts = [];
+  let medDispArr = state['T-medicazione-dispositivi'] || [];
+  if(medDispArr.length){
+    tParts.push('eseguita medicazione di ' + joinPhrases(medDispArr));
+  }
+
+  if(state['T-esami'] && state['T-esami'].length){
+    const strumentali = new Set(['fibroscopia', 'RX', 'TAC', 'risonanza magnetica']);
+    const esamiArr = state['T-esami'].filter(t => !strumentali.has(t));
+    const strumentaliArr = state['T-esami'].filter(t => strumentali.has(t));
+    esamiArr.forEach(a => tParts.push(a));
+    if(strumentaliArr.length) tParts.push('eseguiti ' + joinItalian(strumentaliArr));
+  }
+
+  if(state['T-assistenza'] && state['T-assistenza'].length){
+    state['T-assistenza'].forEach(a => tParts.push(a));
+  }
+
+  if(tParts.length){
+    const sentence = tParts.map(t => capitalize(t) + '.').join(' ');
+    lines.push(sentence);
+  }
+
+  const sesso = state['sesso'] && state['sesso'][0];
+  const etaVal = document.getElementById('eta-val').value;
+
+  let finalLines = sesso === 'F' ? lines.map(l => feminizeText(l)) : lines.slice();
+
+  const openWord = ageOpeningWord(etaVal, sesso);
+  if(openWord){
+    if(nParts.length && finalLines.length){
+      finalLines[0] = openWord + ' ' + finalLines[0].charAt(0).toLowerCase() + finalLines[0].slice(1);
+    } else {
+      finalLines.unshift(openWord + '.');
+    }
+  }
+
+  finalLines = finalLines.map(l => capitalizeSentences(l));
+
+  document.getElementById('output').value = finalLines.join('\n');
+}
+
+document.getElementById('output').addEventListener('input', () => { manualEdit = true; });
+
+function copyOutput(){
+  const out = document.getElementById('output');
+  out.select();
+  navigator.clipboard.writeText(out.value).then(() => {
+    const msg = document.getElementById('copied-msg');
+    msg.style.display = 'inline';
+    setTimeout(() => msg.style.display = 'none', 1500);
+  }).catch(() => {
+    document.execCommand('copy');
+  });
+}
+
+function toggleOutput(){
+  const wrap = document.getElementById('output-wrap');
+  const btn = document.getElementById('toggle-btn');
+  wrap.classList.toggle('collapsed');
+  btn.textContent = wrap.classList.contains('collapsed') ? 'Mostra ▲' : 'Nascondi ▼';
+}
+
+// Su mobile, quando si apre la tastiera per compilare un campo, richiudi il riquadro
+// della consegna generata così restano visibili i flag e il campo che si sta compilando.
+document.querySelectorAll('input, select').forEach(el => {
+  el.addEventListener('focus', () => {
+    document.getElementById('output-wrap').classList.add('collapsed');
+    const btn = document.getElementById('toggle-btn');
+    if(btn) btn.textContent = 'Mostra ▲';
+  });
+});
+
+function resetAll(){
+  document.querySelectorAll('.flag').forEach(f => f.classList.remove('on'));
+  document.querySelectorAll('.sub-flags').forEach(s => s.classList.remove('show'));
+  document.querySelectorAll('.params-box').forEach(p => p.classList.remove('show'));
+  document.querySelectorAll('input[type=number], input[type=text]').forEach(i => i.value = '');
+  for(const k in state) state[k] = [];
+  manualEdit = false;
+  render();
+}
+
+function escapeHtml(str){
+  const d = document.createElement('div');
+  d.textContent = str;
+  return d.innerHTML;
+}
+
+async function saveConsegna(){
+  const lettoInput = document.getElementById('letto-val');
+  const letto = lettoInput.value.trim();
+  const testo = document.getElementById('output').value.trim();
+  if(!letto){
+    lettoInput.focus();
+    return;
+  }
+  if(!testo) return;
+  const eta = document.getElementById('eta-val').value.trim();
+  const sesso = (state['sesso'] && state['sesso'][0]) || '';
+  const { error } = await sb.from('consegne_turno').insert({
+    letto, testo, eta, sesso,
+    stato: JSON.parse(JSON.stringify(state)),
+    inputs: collectInputs()
+  });
+  if(!error){
+    const msg = document.getElementById('saved-msg');
+    msg.style.display = 'inline';
+    setTimeout(() => msg.style.display = 'none', 1500);
+    loadSavedList();
+  } else {
+    console.error(error);
+    alert('Non è stato possibile salvare la consegna.');
+  }
+}
+
+function collectInputs(){
+  const obj = {};
+  document.querySelectorAll('input[type=number], input[type=text]').forEach(i => {
+    if(i.id) obj[i.id] = i.value;
+  });
+  return obj;
+}
+
+function applyState(savedState, savedInputs){
+  // reset everything first
+  document.querySelectorAll('.flag').forEach(f => f.classList.remove('on'));
+  document.querySelectorAll('.sub-flags').forEach(s => s.classList.remove('show'));
+  document.querySelectorAll('.params-box').forEach(p => p.classList.remove('show'));
+  document.querySelectorAll('input[type=number], input[type=text]').forEach(i => i.value = '');
+  for(const k in state) state[k] = [];
+
+  // restore state object
+  if(savedState){
+    for(const k in savedState) state[k] = savedState[k].slice ? savedState[k].slice() : savedState[k];
+  }
+  // restore text inputs
+  if(savedInputs){
+    for(const id in savedInputs){
+      const el = document.getElementById(id);
+      if(el) el.value = savedInputs[id];
+    }
+  }
+  // re-activate flags matching state
+  document.querySelectorAll('.flag').forEach(f => {
+    const holder = f.closest('[data-group]');
+    if(!holder) return;
+    const g = holder.dataset.group;
+    if(state[g] && state[g].includes(f.dataset.text)) f.classList.add('on');
+  });
+  // reveal sub-flags / params boxes based on restored selections
+  document.querySelectorAll('.flag.on[data-sub]').forEach(f => {
+    f.dataset.sub.split(' ').forEach(id => {
+      const el = document.getElementById(id);
+      if(el) el.classList.add('show');
+    });
+  });
+  updateVentParamsVisibility();
+}
+
+async function loadSavedList(){
+  const container = document.getElementById('saved-list');
+  container.innerHTML = '<p class="saved-empty">Caricamento...</p>';
+  const { data: items, error } = await sb.from('consegne_turno').select('*').order('creato_il', { ascending: false });
+  if(error){
+    console.error('Errore nel caricamento elenco:', error);
+    container.innerHTML = '<p class="saved-empty">Impossibile caricare le consegne salvate.</p>';
+    return;
+  }
+  if(!items || items.length === 0){
+    container.innerHTML = '<p class="saved-empty">Nessuna consegna salvata.</p>';
+    return;
+  }
+  container.innerHTML = items.map(item => {
+    const dt = item.creato_il ? new Date(item.creato_il) : null;
+    const dtStr = dt ? dt.toLocaleString('it-IT', {day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}) : '';
+    let meta = [];
+    if(item.eta) meta.push(`${escapeHtml(item.eta)} anni`);
+    if(item.sesso) meta.push(escapeHtml(item.sesso));
+    const metaStr = meta.join(' · ');
+    return `<div class="saved-item" onclick="loadConsegna('${item.id}')">
+      <button class="saved-item-x" onclick="event.stopPropagation(); deleteConsegna('${item.id}')" title="Elimina">×</button>
+      <div class="saved-item-name">Letto ${escapeHtml(item.letto || '—')}</div>
+      ${metaStr ? `<div class="saved-item-meta">${metaStr}</div>` : ''}
+      <div class="saved-item-date">${dtStr}</div>
+    </div>`;
+  }).join('');
+}
+
+async function loadConsegna(id){
+  const { data: item, error } = await sb.from('consegne_turno').select('*').eq('id', id).single();
+  if(error || !item){
+    console.error('Errore nel caricamento:', error);
+    return;
+  }
+  document.getElementById('letto-val').value = item.letto || '';
+  document.getElementById('eta-val').value = item.eta || '';
+  if(item.stato && Object.keys(item.stato).length){
+    applyState(item.stato, item.inputs);
+    manualEdit = false;
+    render();
+  } else {
+    document.getElementById('output').value = item.testo || '';
+    manualEdit = true;
+  }
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+async function deleteConsegna(id){
+  const { error } = await sb.from('consegne_turno').delete().eq('id', id);
+  if(error) console.error(error);
+  loadSavedList();
+}
+
+loadSavedList();
+</script>
+
+</body>
+</html>
