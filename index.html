@@ -364,7 +364,7 @@
     <div class="group" style="margin-bottom:0;border-bottom:none;padding-bottom:0;">
       <div class="flags">
         <span class="inline-input">Letto <input type="text" id="letto-val" placeholder="n°" style="width:70px;"></span>
-        <span class="inline-input">Età <input type="number" id="eta-val" placeholder="anni" style="width:70px;"></span>
+        <span class="inline-input">Età <input type="text" inputmode="numeric" id="eta-val" placeholder="anni" style="width:70px;"></span>
         <span class="inline-group" data-group="sesso" data-mode="radio">
         <span class="flag" data-text="M">M</span>
         <span class="flag" data-text="F">F</span>
@@ -443,14 +443,14 @@
         </div>
       </div>
       <div class="params-box" id="occ-params">
-        <span class="inline-input">Ossigeno <input type="number" id="o2-lmin-val" placeholder="L/min"></span>
+        <span class="inline-input">Ossigeno <input type="text" inputmode="decimal" id="o2-lmin-val" placeholder="L/min"></span>
       </div>
       <div class="params-box" id="vent-params">
-        <span class="inline-input vp-field" data-applies="astral,airvo,neoblend,bubble,invasiva">FiO2 <input type="number" id="fio2-val" placeholder="%"></span>
-        <span class="inline-input vp-field" data-applies="astral,bubble,invasiva">PEEP <input type="number" id="peep-val" placeholder="cmH2O"></span>
-        <span class="inline-input vp-field" data-applies="astral,invasiva">Sopra PEEP <input type="number" id="sopra-peep-val" placeholder="cmH2O"></span>
-        <span class="inline-input vp-field" data-applies="airvo,neoblend,bubble">Flusso <input type="number" id="flusso-val" placeholder="L/min"> L/min</span>
-        <span class="inline-input vp-field" data-applies="invasiva">Atti <input type="number" id="atti-val" placeholder="/min"></span>
+        <span class="inline-input vp-field" data-applies="astral,airvo,neoblend,bubble,invasiva">FiO2 <input type="text" inputmode="decimal" id="fio2-val" placeholder="%"></span>
+        <span class="inline-input vp-field" data-applies="astral,bubble,invasiva">PEEP <input type="text" inputmode="decimal" id="peep-val" placeholder="cmH2O"></span>
+        <span class="inline-input vp-field" data-applies="astral,invasiva">Sopra PEEP <input type="text" inputmode="decimal" id="sopra-peep-val" placeholder="cmH2O"></span>
+        <span class="inline-input vp-field" data-applies="airvo,neoblend,bubble">Flusso <input type="text" inputmode="decimal" id="flusso-val" placeholder="L/min"> L/min</span>
+        <span class="inline-input vp-field" data-applies="invasiva">Atti <input type="text" inputmode="decimal" id="atti-val" placeholder="/min"></span>
         <span class="inline-input vp-field" data-applies="astral,invasiva">Modalità <input type="text" class="wide" id="modalita-val" placeholder="es. PC, SIMV, PS..."></span>
       </div>
     </div>
@@ -793,9 +793,11 @@ const sb = window.supabase.createClient(
 const state = {};
 let manualEdit = false;
 
-// Niente barra AutoFill (contatti/password) sopra la tastiera sui campi di testo libero.
-// Su iOS il trucco è type="search": quei campi non attivano l'AutoFill. I campi numerici
-// (FiO2, PEEP, atti/min, ecc.) restano type="number" per mantenere il tastierino numerico.
+// Niente barra AutoFill (contatti/password) sopra la tastiera. Il trucco è type="search":
+// quei campi non attivano l'AutoFill. type="number" invece lo attiva comunque su Android/
+// Gboard e ignora enterkeyhint, perciò i campi numerici (FiO2, PEEP, atti/min, età, ecc.)
+// usano type="text" con inputmode="decimal|numeric" nell'HTML, che mostra lo stesso il
+// tastierino numerico ma passa per lo stesso trattamento dei campi di testo qui sotto.
 (function hardenTextInputsAgainstAutofill(){
   const SKIP_TYPES = ['date','datetime-local','time','month','week','number','range',
     'checkbox','radio','color','file','password','email','tel','url'];
