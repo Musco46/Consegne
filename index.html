@@ -827,7 +827,6 @@ document.querySelectorAll('input, textarea:not(#output)').forEach(el => {
 
 document.querySelectorAll('.flag').forEach(flag => {
   flag.addEventListener('click', () => {
-    const oldOutputValue = document.getElementById('output').value;
     const group = flag.closest('.group, .sub-flags, .inline-group, .mini-group');
     const groupName = group.dataset.group;
     const mode = group.dataset.mode;
@@ -896,8 +895,8 @@ document.querySelectorAll('.flag').forEach(flag => {
     }
 
     manualEdit = false;
+    highlightSource = groupName;
     render();
-    applyOutputDiffEffects(oldOutputValue);
     scrollFlagToFixedPosition(group);
   });
 });
@@ -907,10 +906,9 @@ document.querySelectorAll('.flag').forEach(flag => {
  'tor-asp-val','tor-qta-val','add-asp-val','add-qta-val','cra-asp-val','cra-qta-val','alt-asp-val','alt-qta-val'].forEach(id => {
   const el = document.getElementById(id);
   if(el) el.addEventListener('input', () => {
-    const oldOutputValue = document.getElementById('output').value;
     manualEdit = false;
+    highlightSource = id;
     render();
-    applyOutputDiffEffects(oldOutputValue);
   });
 });
 
@@ -965,14 +963,42 @@ function feminizeText(text){
   pairs.forEach(([m, f]) => { result = feminizeWord(result, m, f); });
   return result;
 }
+// Marcatori invisibili usati per sapere esattamente quale tratto del testo generato
+// corrisponde all'ultimo flag cliccato o campo compilato: render() li inserisce attorno
+// alla frase interessata mentre costruisce il testo (quindi lo sa con certezza, senza
+// doverlo dedurre confrontando il testo prima/dopo), e vengono rimossi subito prima di
+// mostrare il risultato. Sono caratteri di controllo che non compaiono mai nel testo vero,
+// quindi capitalize/capitalizeSentences/feminizeText devono solo "vederci attraverso".
+const MARK_START = '\u0001';
+const MARK_END = '\u0002';
+let highlightSource = null; // nome del gruppo di stato o id del campo appena modificato
+
+function sourceMatches(...keys){
+  return highlightSource != null && keys.includes(highlightSource);
+}
+
+function mark(matches, text){
+  return (matches && text) ? MARK_START + text + MARK_END : text;
+}
+
 function capitalize(s){
   if(!s) return s;
-  return s.charAt(0).toUpperCase() + s.slice(1);
+  let i = 0;
+  while(i < s.length && (s[i] === MARK_START || s[i] === MARK_END)) i++;
+  if(i >= s.length) return s;
+  return s.slice(0, i) + s.charAt(i).toUpperCase() + s.slice(i + 1);
+}
+
+function lowerFirstReal(s){
+  let i = 0;
+  while(i < s.length && (s[i] === MARK_START || s[i] === MARK_END)) i++;
+  if(i >= s.length) return s;
+  return s.slice(0, i) + s.charAt(i).toLowerCase() + s.slice(i + 1);
 }
 
 function capitalizeSentences(s){
   if(!s) return s;
-  return s.replace(/(^|[.!?]\s+)([a-zàèéìòù])/g, (m, sep, ch) => sep + ch.toUpperCase());
+  return s.replace(/(^|[.!?]\s+)([\u0001\u0002]*)([a-zàèéìòù])/g, (m, sep, marks, ch) => sep + marks + ch.toUpperCase());
 }
 
 function currentDeviceKey(){
@@ -1024,15 +1050,17 @@ function render(){
       coscienzaArr = coscienzaArr.map(t => t === 'vigile' ? 'vigile' : t);
       coscienzaArr.unshift('semi-sedato');
     }
-    nParts.push(joinPhrases(coscienzaArr));
+    nParts.push(mark(sourceMatches('N-coscienza'), joinPhrases(coscienzaArr)));
   }
-  if(state['N-reattivita'] && state['N-reattivita'][0]) nParts.push(state['N-reattivita'][0]);
-  if(state['N-agitazione'] && state['N-agitazione'][0]) nParts.push(state['N-agitazione'][0]);
-  if(state['N-consolabilita'] && state['N-consolabilita'][0]) nParts.push(state['N-consolabilita'][0]);
+  if(state['N-reattivita'] && state['N-reattivita'][0]) nParts.push(mark(sourceMatches('N-reattivita'), state['N-reattivita'][0]));
+  if(state['N-agitazione'] && state['N-agitazione'][0]) nParts.push(mark(sourceMatches('N-agitazione'), state['N-agitazione'][0]));
+  if(state['N-consolabilita'] && state['N-consolabilita'][0]) nParts.push(mark(sourceMatches('N-consolabilita'), state['N-consolabilita'][0]));
   if(nParts.length) lines.push(capitalize(joinPhrases(nParts, ', ')) + '.');
 
   // 2 - Ventilazione
   let vParts = [];
+  const V_SUPPORTO_KEYS = ['V-supporto','V-niv-device-sel','V-invasiva-via-sel',
+    'fio2-val','peep-val','sopra-peep-val','flusso-val','atti-val','o2-lmin-val','modalita-val'];
 
   let vSupporto = state['V-supporto'] && state['V-supporto'][0];
   if(vSupporto){
@@ -1078,14 +1106,14 @@ function render(){
       } else {
         supTxt = vSupporto;
       }
-      vParts.push(supTxt + (paramBits.length ? ` (${paramBits.join(', ')})` : ''));
+      vParts.push(mark(sourceMatches(...V_SUPPORTO_KEYS), supTxt + (paramBits.length ? ` (${paramBits.join(', ')})` : '')));
     } else {
-      vParts.push(vSupporto);
+      vParts.push(mark(sourceMatches(...V_SUPPORTO_KEYS), vSupporto));
     }
   }
 
   let vSpo2 = state['V-spo2'] && state['V-spo2'][0];
-  if(vSpo2) vParts.push(vSpo2);
+  if(vSpo2) vParts.push(mark(sourceMatches('V-spo2'), vSpo2));
 
   let vSecr = state['V-secrezioni'] && state['V-secrezioni'][0];
   if(vSecr){
@@ -1104,11 +1132,11 @@ function render(){
       });
       secrBits.push(joinItalian(ordered));
     }
-    vParts.push(secrBits.join(', '));
+    vParts.push(mark(sourceMatches('V-secrezioni', 'V-aspetto-sel'), secrBits.join(', ')));
   }
 
   if(state['V-scialorrea'] && state['V-scialorrea'].length){
-    vParts.push('presenta abbondante scialorrea');
+    vParts.push(mark(sourceMatches('V-scialorrea'), 'presenta abbondante scialorrea'));
   }
 
   if(vParts.length) lines.push(capitalize(joinPhrases(vParts, '. ')) + '.');
@@ -1122,19 +1150,19 @@ function render(){
     const prefix = hasArteria ? 'emodinamica' : 'pressione arteriosa';
     let stateTxt = `${prefix} ${cStatoWord}`;
     if(hasAmine) stateTxt += ', sostenuta da ammine';
-    cParts.push(stateTxt);
+    cParts.push(mark(sourceMatches('C-stato', 'C-catetere-arterioso', 'C-amine'), stateTxt));
   } else if(hasAmine){
-    cParts.push('sostenuta da ammine');
+    cParts.push(mark(sourceMatches('C-amine'), 'sostenuta da ammine'));
   }
-  if(state['C-cute'] && state['C-cute'][0]) cParts.push(state['C-cute'][0]);
+  if(state['C-cute'] && state['C-cute'][0]) cParts.push(mark(sourceMatches('C-cute'), state['C-cute'][0]));
   let cTemp = state['C-temp'] && state['C-temp'][0];
   const tempVal = document.getElementById('temp-val').value;
   if(cTemp === 'apiretico'){
-    cParts.push('apiretico');
+    cParts.push(mark(sourceMatches('C-temp', 'temp-val'), 'apiretico'));
   } else if(cTemp){
-    cParts.push(tempVal ? `${cTemp}, TC ${tempVal}°C` : cTemp);
+    cParts.push(mark(sourceMatches('C-temp', 'temp-val'), tempVal ? `${cTemp}, TC ${tempVal}°C` : cTemp));
   } else if(tempVal){
-    cParts.push(`TC ${tempVal}°C`);
+    cParts.push(mark(sourceMatches('C-temp', 'temp-val'), `TC ${tempVal}°C`));
   }
   if(cParts.length) lines.push(capitalize(joinPhrases(cParts, '. ')) + '.');
 
@@ -1148,9 +1176,9 @@ function render(){
     if(state['U-lasix'] && state['U-lasix'].length) diuresiTxt += ', stimolata da Lasix';
     let urineBits = [uQuantita, uUrine].filter(Boolean);
     if(urineBits.length) diuresiTxt += ', ' + urineBits.join(', ');
-    uParts.push(diuresiTxt);
+    uParts.push(mark(sourceMatches('U-diuresi', 'U-lasix', 'U-urine', 'U-quantita'), diuresiTxt));
   } else if(state['U-lasix'] && state['U-lasix'].length){
-    uParts.push('in terapia con Lasix');
+    uParts.push(mark(sourceMatches('U-lasix'), 'in terapia con Lasix'));
   }
 
   let uAlim = state['U-alimentazione'] && state['U-alimentazione'][0];
@@ -1165,6 +1193,7 @@ function render(){
 
   const ristagnoQta = document.getElementById('ristagno-qta-val').value;
   const ristagnoQtySuffix = ristagnoQta ? ` (${ristagnoQta} ml)` : '';
+  const ACCESSO_KEYS = ['U-via-enterale-sel', 'U-via-stato-sel', 'U-ristagno-sel', 'ristagno-qta-val'];
 
   if(uAlim){
     let alimTxt = viaMentionedInAlim ? `${uAlim} ${uVia}` : uAlim;
@@ -1176,7 +1205,7 @@ function render(){
       extraBits.push(ristagnoTxt ? ('presente ' + ristagnoTxt + ristagnoQtySuffix) : 'ben tollerata');
       alimTxt += ', ' + extraBits.join(', ');
     }
-    uParts.push(alimTxt);
+    uParts.push(mark(sourceMatches('U-alimentazione', ...ACCESSO_KEYS), alimTxt));
   }
 
   // stato (chiuso/a caduta) e ristagno quando l'accesso digestivo non è legato
@@ -1191,7 +1220,7 @@ function render(){
     } else {
       accessoTxt = `${deviceLabel} in sede`;
     }
-    uParts.push(accessoTxt);
+    uParts.push(mark(sourceMatches(...ACCESSO_KEYS), accessoTxt));
   }
 
   let uAlvo = state['U-alvo'] && state['U-alvo'][0];
@@ -1202,7 +1231,7 @@ function render(){
     const feciBits = [];
     if(consistenza.length) feciBits.push('feci ' + joinItalian(consistenza));
     feciBits.push(...altro);
-    uParts.push(feciBits.length ? `${uAlvo}, ${joinPhrases(feciBits)}` : uAlvo);
+    uParts.push(mark(sourceMatches('U-alvo', 'U-feci-sel'), feciBits.length ? `${uAlvo}, ${joinPhrases(feciBits)}` : uAlvo));
   }
 
   if(uParts.length) lines.push(capitalize(joinPhrases(uParts, '. ')) + '.');
@@ -1214,7 +1243,7 @@ function render(){
     addominale: { label: 'drenaggio addominale', asp: 'AC-add-aspirazione', dren: 'AC-add-drenato', aspId: 'add-asp-val', qtaId: 'add-qta-val' },
     cranico:    { label: 'drenaggio cranico',    asp: 'AC-cra-aspirazione', dren: 'AC-cra-drenato', aspId: 'cra-asp-val', qtaId: 'cra-qta-val' }
   };
-  function buildDrenaggio(label, aspGroup, drenGroup, aspInputId, qtaInputId){
+  function buildDrenaggio(label, aspGroup, drenGroup, aspInputId, qtaInputId, extraKeys){
     let materialeTxt = '';
     let drenatoArr = (state[drenGroup] || []).slice();
     if(drenatoArr.length){
@@ -1242,14 +1271,14 @@ function render(){
     } else if(materialeTxt){
       str += `, drenato ${materialeTxt}`;
     }
-    return str;
+    return mark(sourceMatches('AC-drenaggi', aspGroup, drenGroup, aspInputId, qtaInputId, ...(extraKeys || [])), str);
   }
 
   (state['AC-drenaggi'] || []).forEach(d => {
     if(d === 'altro'){
       const sede = document.getElementById('altro-sede-val') ? document.getElementById('altro-sede-val').value.trim() : '';
       const label = sede ? `drenaggio ${sede}` : 'drenaggio';
-      acParts.push(buildDrenaggio(label, 'AC-alt-aspirazione', 'AC-alt-drenato', 'alt-asp-val', 'alt-qta-val'));
+      acParts.push(buildDrenaggio(label, 'AC-alt-aspirazione', 'AC-alt-drenato', 'alt-asp-val', 'alt-qta-val', ['altro-sede-val']));
     } else if(drenConfig[d]){
       const cfg = drenConfig[d];
       acParts.push(buildDrenaggio(cfg.label, cfg.asp, cfg.dren, cfg.aspId, cfg.qtaId));
@@ -1262,19 +1291,19 @@ function render(){
   let tParts = [];
   let medDispArr = state['T-medicazione-dispositivi'] || [];
   if(medDispArr.length){
-    tParts.push('eseguita medicazione di ' + joinPhrases(medDispArr));
+    tParts.push(mark(sourceMatches('T-medicazione-dispositivi'), 'eseguita medicazione di ' + joinPhrases(medDispArr)));
   }
 
   if(state['T-esami'] && state['T-esami'].length){
     const strumentali = new Set(['fibroscopia', 'RX', 'TAC', 'risonanza magnetica']);
     const esamiArr = state['T-esami'].filter(t => !strumentali.has(t));
     const strumentaliArr = state['T-esami'].filter(t => strumentali.has(t));
-    esamiArr.forEach(a => tParts.push(a));
-    if(strumentaliArr.length) tParts.push('eseguiti ' + joinItalian(strumentaliArr));
+    esamiArr.forEach(a => tParts.push(mark(sourceMatches('T-esami'), a)));
+    if(strumentaliArr.length) tParts.push(mark(sourceMatches('T-esami'), 'eseguiti ' + joinItalian(strumentaliArr)));
   }
 
   if(state['T-assistenza'] && state['T-assistenza'].length){
-    state['T-assistenza'].forEach(a => tParts.push(a));
+    state['T-assistenza'].forEach(a => tParts.push(mark(sourceMatches('T-assistenza'), a)));
   }
 
   if(tParts.length){
@@ -1289,16 +1318,50 @@ function render(){
 
   const openWord = ageOpeningWord(etaVal, sesso);
   if(openWord){
+    const markedOpenWord = mark(sourceMatches('eta-val'), openWord);
     if(nParts.length && finalLines.length){
-      finalLines[0] = openWord + ' ' + finalLines[0].charAt(0).toLowerCase() + finalLines[0].slice(1);
+      finalLines[0] = markedOpenWord + ' ' + lowerFirstReal(finalLines[0]);
     } else {
-      finalLines.unshift(openWord + '.');
+      finalLines.unshift(markedOpenWord + '.');
     }
   }
 
   finalLines = finalLines.map(l => capitalizeSentences(l));
 
-  document.getElementById('output').value = finalLines.join('\n');
+  applyRenderedText(finalLines.join('\n'));
+}
+
+// Estrae dal testo marcato l'intervallo esatto (se presente) corrispondente all'ultimo
+// flag cliccato o campo compilato, rimuove i marcatori e aggiorna la textarea più
+// l'evidenziazione. Non serve confrontare il testo prima/dopo: render() sa già, mentre
+// costruisce la frase, quale tratto appartiene al gruppo appena modificato.
+function applyRenderedText(markedText){
+  const textarea = document.getElementById('output');
+  const idxA = markedText.indexOf(MARK_START);
+  let clean = markedText;
+  let range = null;
+  if(idxA !== -1){
+    const idxB = markedText.indexOf(MARK_END, idxA);
+    if(idxB !== -1){
+      clean = markedText.slice(0, idxA) + markedText.slice(idxA + 1, idxB) + markedText.slice(idxB + 1);
+      if(idxB - 1 > idxA) range = { start: idxA, end: idxB - 1 };
+    } else {
+      clean = markedText.split(MARK_START).join('');
+    }
+  }
+  textarea.value = clean;
+  if(!range){
+    clearOutputHighlight();
+    return;
+  }
+  if(textarea.clientHeight === 0){
+    // Riquadro nascosto (es. tastiera aperta su mobile): la textarea non è misurabile per
+    // scroll/riquadri, ma salviamo comunque l'intervallo corretto, così quando torna
+    // visibile mostra subito la parte giusta invece di restare fermo su una vecchia.
+    currentHighlightRange = range;
+    return;
+  }
+  scrollAndHighlightRange(textarea, range.start, range.end);
 }
 
 document.getElementById('output').addEventListener('input', () => { manualEdit = true; clearOutputHighlight(); });
@@ -1319,7 +1382,9 @@ function toggleOutput(){
   const wrap = document.getElementById('output-wrap');
   const btn = document.getElementById('toggle-btn');
   wrap.classList.toggle('collapsed');
-  btn.textContent = wrap.classList.contains('collapsed') ? 'Mostra ▲' : 'Nascondi ▼';
+  const isCollapsed = wrap.classList.contains('collapsed');
+  btn.textContent = isCollapsed ? 'Mostra ▲' : 'Nascondi ▼';
+  if(!isCollapsed) rebuildHighlightRects();
 }
 
 // Su mobile, quando si apre la tastiera per compilare un campo, richiudi il riquadro
@@ -1345,6 +1410,7 @@ document.querySelectorAll('input, select').forEach(el => {
         const btn = document.getElementById('toggle-btn');
         if(btn) btn.textContent = 'Nascondi ▼';
         outputAutoCollapsed = false;
+        rebuildHighlightRects();
       }
     }, 150);
   });
@@ -1368,74 +1434,6 @@ function clearOutputHighlight(){
   lastHighlightRects = [];
 }
 
-// Spezza il testo in parole (lettere accentate incluse) e "resto" (spazi, punteggiatura),
-// alternati, così il confronto avviene per parola intera e non per singolo carattere.
-function tokenizeWords(str){
-  return str.match(/[A-Za-zÀ-ÖØ-öø-ÿ]+|[^A-Za-zÀ-ÖØ-öø-ÿ]+/g) || [];
-}
-
-// Trova il tratto cambiato tra due stringhe confrontando prefisso e suffisso comuni,
-// a livello di parola intera (non di singolo carattere) e ignorando le differenze di sola
-// maiuscola/minuscola: altrimenti "Negativo"->"Positivo" evidenzierebbe solo "Posi" (unica
-// parte diversa carattere per carattere) invece dell'intera parola, e un cambio di
-// capitalizzazione dovuto solo a un riordino di frase verrebbe evidenziato a torto.
-function trimCommonEnds(oldSeg, newSeg){
-  const oldTokens = tokenizeWords(oldSeg);
-  const newTokens = tokenizeWords(newSeg);
-  let start = 0;
-  const maxStart = Math.min(oldTokens.length, newTokens.length);
-  while(start < maxStart && oldTokens[start].toLowerCase() === newTokens[start].toLowerCase()) start++;
-  let oldEnd = oldTokens.length, newEnd = newTokens.length;
-  while(oldEnd > start && newEnd > start && oldTokens[oldEnd - 1].toLowerCase() === newTokens[newEnd - 1].toLowerCase()){
-    oldEnd--; newEnd--;
-  }
-  const charStart = newTokens.slice(0, start).join('').length;
-  const charEnd = newTokens.slice(0, newEnd).join('').length;
-  const oldCharStart = oldTokens.slice(0, start).join('').length;
-  const oldCharEnd = oldTokens.slice(0, oldEnd).join('').length;
-  return { start: charStart, end: charEnd, removedLength: oldCharEnd - oldCharStart };
-}
-
-// Confronta prima riga per riga (uguaglianza esatta, senza falsi positivi da singoli
-// caratteri coincidenti) per isolare quale riga è davvero cambiata, poi affina il
-// confronto carattere per carattere solo dentro quella riga. Necessario perché un diff
-// carattere-per-carattere su tutto il testo può "allargarsi" oltre la vera modifica se un
-// carattere vicino al confine con la riga successiva (invariata) coincide per caso.
-function diffRange(oldText, newText){
-  const oldLines = oldText.split('\n');
-  const newLines = newText.split('\n');
-  let startLine = 0;
-  const maxLines = Math.min(oldLines.length, newLines.length);
-  while(startLine < maxLines && oldLines[startLine] === newLines[startLine]) startLine++;
-  let oldEndLine = oldLines.length, newEndLine = newLines.length;
-  while(oldEndLine > startLine && newEndLine > startLine && oldLines[oldEndLine - 1] === newLines[newEndLine - 1]){
-    oldEndLine--; newEndLine--;
-  }
-  const charStart = newLines.slice(0, startLine).reduce((sum, l) => sum + l.length + 1, 0);
-  const oldSegment = oldLines.slice(startLine, oldEndLine).join('\n');
-  const newSegment = newLines.slice(startLine, newEndLine).join('\n');
-  const inner = trimCommonEnds(oldSegment, newSegment);
-  return {
-    start: charStart + inner.start,
-    end: charStart + inner.end,
-    removedLength: inner.removedLength
-  };
-}
-
-// Da chiamare con il valore della textarea PRIMA della modifica (subito prima di
-// aggiornare stato + render()); calcola cosa è cambiato e aggiorna scroll ed evidenziazione.
-function applyOutputDiffEffects(oldValue){
-  const textarea = document.getElementById('output');
-  if(textarea.clientHeight === 0) return;
-  const diff = diffRange(oldValue, textarea.value);
-  if(diff.end <= diff.start){
-    // nulla di nuovo è stato inserito (es. deselezionato un flag): non c'è niente da
-    // evidenziare, quindi puliamo il riquadro invece di lasciarlo appeso a un testo vecchio.
-    clearOutputHighlight();
-    return;
-  }
-  scrollAndHighlightRange(textarea, diff.start, diff.end);
-}
 
 function scrollAndHighlightRange(textarea, start, end){
   const value = textarea.value;
@@ -1542,13 +1540,17 @@ function scrollFlagToFixedPosition(categoryEl){
   const mainEl = document.querySelector('main');
   const isContainerScroll = getComputedStyle(mainEl).overflowY === 'auto' || getComputedStyle(mainEl).overflowY === 'scroll';
   const rect = categoryEl.getBoundingClientRect();
+  // Scroll istantaneo, non "smooth": con l'animazione, click ravvicinati su chip della
+  // stessa categoria (frequente, es. Emodinamica o Diuresi) misuravano la posizione a
+  // animazione ancora in corso, quindi non ancora assestata, causando uno scorrimento
+  // verso il basso che si accumulava a ogni click invece di stabilizzarsi.
   if(isContainerScroll){
     const mainRect = mainEl.getBoundingClientRect();
     const delta = (rect.top - mainRect.top) - FLAG_SCROLL_OFFSET;
-    mainEl.scrollBy({ top: delta, behavior: 'smooth' });
+    mainEl.scrollTop += delta;
   } else {
     const delta = rect.top - FLAG_SCROLL_OFFSET;
-    window.scrollBy({ top: delta, behavior: 'smooth' });
+    window.scrollBy(0, delta);
   }
 }
 
@@ -1559,6 +1561,7 @@ function resetAll(){
   document.querySelectorAll('input[type=number], input[type=text]').forEach(i => i.value = '');
   for(const k in state) state[k] = [];
   manualEdit = false;
+  highlightSource = null;
   render();
   clearOutputHighlight();
 }
@@ -1679,6 +1682,7 @@ async function loadConsegna(id){
   }
   document.getElementById('letto-val').value = item.letto || '';
   document.getElementById('eta-val').value = item.eta || '';
+  highlightSource = null;
   if(item.stato && Object.keys(item.stato).length){
     applyState(item.stato, item.inputs);
     manualEdit = false;
