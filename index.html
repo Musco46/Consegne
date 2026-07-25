@@ -795,6 +795,7 @@ let manualEdit = false;
 
 document.querySelectorAll('.flag').forEach(flag => {
   flag.addEventListener('click', () => {
+    const oldOutputValue = document.getElementById('output').value;
     const group = flag.closest('.group, .sub-flags, .inline-group, .mini-group');
     const groupName = group.dataset.group;
     const mode = group.dataset.mode;
@@ -864,9 +865,7 @@ document.querySelectorAll('.flag').forEach(flag => {
 
     manualEdit = false;
     render();
-    if(flag.classList.contains('on')){
-      scrollTextareaToText(document.getElementById('output'), flag.dataset.text);
-    }
+    applyOutputDiffEffects(oldOutputValue);
     scrollFlagToFixedPosition(group);
   });
 });
@@ -876,10 +875,10 @@ document.querySelectorAll('.flag').forEach(flag => {
  'tor-asp-val','tor-qta-val','add-asp-val','add-qta-val','cra-asp-val','cra-qta-val','alt-asp-val','alt-qta-val'].forEach(id => {
   const el = document.getElementById(id);
   if(el) el.addEventListener('input', () => {
+    const oldOutputValue = document.getElementById('output').value;
     manualEdit = false;
     render();
-    const val = el.value.trim();
-    if(val) scrollTextareaToText(document.getElementById('output'), val);
+    applyOutputDiffEffects(oldOutputValue);
   });
 });
 
@@ -1270,7 +1269,7 @@ function render(){
   document.getElementById('output').value = finalLines.join('\n');
 }
 
-document.getElementById('output').addEventListener('input', () => { manualEdit = true; setOutputHighlight(null); });
+document.getElementById('output').addEventListener('input', () => { manualEdit = true; clearOutputHighlight(); });
 
 function copyOutput(){
   const out = document.getElementById('output');
@@ -1321,23 +1320,119 @@ document.querySelectorAll('input, select').forEach(el => {
 
 // Una <textarea> non supporta la formattazione (non si può rendere in grassetto solo un
 // tratto di testo nativo), quindi come equivalente disegniamo un riquadro evidenziato
-// dietro al testo appena aggiunto, usando un div "specchio" fuori schermo per misurare
+// dietro al testo appena cambiato, usando un div "specchio" fuori schermo per misurare
 // la posizione esatta (gestisce anche il caso in cui il testo vada a capo su più righe).
-// Resta visibile finché non viene sostituito dal prossimo flag/campo modificato.
-let outputHighlightText = null;
+// L'evidenziazione NON cerca il testo del chip cliccato nell'output (parole come
+// "ematico" o "chiuso" possono comparire più volte o cambiare forma per la concordanza
+// di genere): confronta invece il testo prima e dopo la modifica e trova esattamente il
+// tratto cambiato, indipendentemente da cosa l'ha generato.
+let currentHighlightRange = null; // {start, end} nel testo corrente, o null
 let lastHighlightRects = [];
 
-function updateOutputHighlightMark(){
+function clearOutputHighlight(){
+  currentHighlightRange = null;
+  const markEl = document.getElementById('output-highlight-mark');
+  markEl.innerHTML = '';
+  lastHighlightRects = [];
+}
+
+// Trova il tratto cambiato tra due stringhe confrontando prefisso e suffisso comuni.
+function trimCommonEnds(oldSeg, newSeg){
+  let start = 0;
+  const maxStart = Math.min(oldSeg.length, newSeg.length);
+  while(start < maxStart && oldSeg[start] === newSeg[start]) start++;
+  let oldEnd = oldSeg.length, newEnd = newSeg.length;
+  while(oldEnd > start && newEnd > start && oldSeg[oldEnd - 1] === newSeg[newEnd - 1]){
+    oldEnd--; newEnd--;
+  }
+  return { start, end: newEnd, removedLength: oldEnd - start };
+}
+
+// Confronta prima riga per riga (uguaglianza esatta, senza falsi positivi da singoli
+// caratteri coincidenti) per isolare quale riga è davvero cambiata, poi affina il
+// confronto carattere per carattere solo dentro quella riga. Necessario perché un diff
+// carattere-per-carattere su tutto il testo può "allargarsi" oltre la vera modifica se un
+// carattere vicino al confine con la riga successiva (invariata) coincide per caso.
+function diffRange(oldText, newText){
+  const oldLines = oldText.split('\n');
+  const newLines = newText.split('\n');
+  let startLine = 0;
+  const maxLines = Math.min(oldLines.length, newLines.length);
+  while(startLine < maxLines && oldLines[startLine] === newLines[startLine]) startLine++;
+  let oldEndLine = oldLines.length, newEndLine = newLines.length;
+  while(oldEndLine > startLine && newEndLine > startLine && oldLines[oldEndLine - 1] === newLines[newEndLine - 1]){
+    oldEndLine--; newEndLine--;
+  }
+  const charStart = newLines.slice(0, startLine).reduce((sum, l) => sum + l.length + 1, 0);
+  const oldSegment = oldLines.slice(startLine, oldEndLine).join('\n');
+  const newSegment = newLines.slice(startLine, newEndLine).join('\n');
+  const inner = trimCommonEnds(oldSegment, newSegment);
+  return {
+    start: charStart + inner.start,
+    end: charStart + inner.end,
+    removedLength: inner.removedLength
+  };
+}
+
+// Da chiamare con il valore della textarea PRIMA della modifica (subito prima di
+// aggiornare stato + render()); calcola cosa è cambiato e aggiorna scroll ed evidenziazione.
+function applyOutputDiffEffects(oldValue){
+  const textarea = document.getElementById('output');
+  if(textarea.clientHeight === 0) return;
+  const diff = diffRange(oldValue, textarea.value);
+  if(diff.end <= diff.start){
+    // nulla di nuovo è stato inserito (es. deselezionato un flag): non c'è niente da
+    // evidenziare, quindi puliamo il riquadro invece di lasciarlo appeso a un testo vecchio.
+    clearOutputHighlight();
+    return;
+  }
+  scrollAndHighlightRange(textarea, diff.start, diff.end);
+}
+
+function scrollAndHighlightRange(textarea, start, end){
+  const value = textarea.value;
+  const mirror = document.createElement('div');
+  const cs = getComputedStyle(textarea);
+  ['fontFamily','fontSize','fontWeight','fontStyle','lineHeight','letterSpacing','padding','borderWidth','boxSizing','wordBreak'].forEach(p => { mirror.style[p] = cs[p]; });
+  mirror.style.whiteSpace = 'pre-wrap';
+  mirror.style.wordWrap = 'break-word';
+  mirror.style.position = 'absolute';
+  mirror.style.visibility = 'hidden';
+  mirror.style.height = 'auto';
+  mirror.style.width = textarea.clientWidth + 'px';
+  mirror.style.left = '-9999px';
+  mirror.style.top = '0';
+  document.body.appendChild(mirror);
+
+  mirror.appendChild(document.createTextNode(value.slice(0, start)));
+  const span = document.createElement('span');
+  span.textContent = value.slice(start, end) || '​';
+  mirror.appendChild(span);
+  mirror.appendChild(document.createTextNode(value.slice(start + span.textContent.length)));
+
+  const markerTop = span.offsetTop;
+  const markerHeight = span.offsetHeight || parseFloat(cs.lineHeight) || 20;
+  document.body.removeChild(mirror);
+
+  const maxScroll = Math.max(0, textarea.scrollHeight - textarea.clientHeight);
+  const target = markerTop - (textarea.clientHeight / 2) + (markerHeight / 2);
+  textarea.scrollTop = Math.max(0, Math.min(target, maxScroll));
+
+  currentHighlightRange = { start, end };
+  rebuildHighlightRects();
+}
+
+// Ricalcola solo i riquadri evidenziati (senza toccare lo scroll), usando l'intervallo
+// già noto: usato dopo un click/input (via scrollAndHighlightRange) e al resize finestra.
+function rebuildHighlightRects(){
   const textarea = document.getElementById('output');
   const markEl = document.getElementById('output-highlight-mark');
   markEl.innerHTML = '';
   lastHighlightRects = [];
-  if(!outputHighlightText) return;
+  if(!currentHighlightRange) return;
+  const { start, end } = currentHighlightRange;
   const value = textarea.value;
-  let idx = value.indexOf(outputHighlightText);
-  if(idx === -1) idx = value.toLowerCase().indexOf(outputHighlightText.toLowerCase());
-  if(idx === -1) return;
-  const len = Math.max(outputHighlightText.length, 1);
+  if(end > value.length) return;
 
   const mirror = document.createElement('div');
   const cs = getComputedStyle(textarea);
@@ -1352,16 +1447,17 @@ function updateOutputHighlightMark(){
   mirror.style.top = '0';
   document.body.appendChild(mirror);
 
-  mirror.appendChild(document.createTextNode(value.slice(0, idx)));
+  mirror.appendChild(document.createTextNode(value.slice(0, start)));
   const span = document.createElement('span');
-  span.textContent = value.slice(idx, idx + len) || '​';
+  span.textContent = value.slice(start, end) || '​';
   mirror.appendChild(span);
-  mirror.appendChild(document.createTextNode(value.slice(idx + span.textContent.length)));
+  mirror.appendChild(document.createTextNode(value.slice(start + span.textContent.length)));
 
   const mirrorRect = mirror.getBoundingClientRect();
   const range = document.createRange();
   range.selectNodeContents(span);
   const rects = Array.from(range.getClientRects());
+  document.body.removeChild(mirror);
 
   rects.forEach(r => {
     const top = r.top - mirrorRect.top;
@@ -1375,13 +1471,6 @@ function updateOutputHighlightMark(){
     mark.style.height = r.height + 'px';
     markEl.appendChild(mark);
   });
-
-  document.body.removeChild(mirror);
-}
-
-function setOutputHighlight(searchText){
-  outputHighlightText = searchText || null;
-  updateOutputHighlightMark();
 }
 
 document.getElementById('output').addEventListener('scroll', () => {
@@ -1392,51 +1481,7 @@ document.getElementById('output').addEventListener('scroll', () => {
     if(base) child.style.top = (base.top - textarea.scrollTop) + 'px';
   });
 });
-window.addEventListener('resize', () => updateOutputHighlightMark());
-
-// Scorre la textarea della consegna generata fino al testo del flag appena selezionato,
-// centrandolo in verticale; se non lo trova (es. testo cambiato dalla concordanza di
-// genere) scorre semplicemente in fondo, dove di norma si trova il contenuto più recente.
-function scrollTextareaToText(textarea, searchText, fallbackToEnd=true){
-  if(textarea.clientHeight === 0) return;
-  const value = textarea.value;
-  let idx = searchText ? value.indexOf(searchText) : -1;
-  if(idx === -1 && searchText) idx = value.toLowerCase().indexOf(searchText.toLowerCase());
-  if(idx === -1){
-    if(fallbackToEnd) textarea.scrollTop = textarea.scrollHeight;
-    setOutputHighlight(null);
-    return;
-  }
-  const len = Math.max(searchText.length, 1);
-  const mirror = document.createElement('div');
-  const cs = getComputedStyle(textarea);
-  ['fontFamily','fontSize','fontWeight','fontStyle','lineHeight','letterSpacing','padding','borderWidth','boxSizing','wordBreak'].forEach(p => { mirror.style[p] = cs[p]; });
-  mirror.style.whiteSpace = 'pre-wrap';
-  mirror.style.wordWrap = 'break-word';
-  mirror.style.position = 'absolute';
-  mirror.style.visibility = 'hidden';
-  mirror.style.height = 'auto';
-  mirror.style.width = textarea.clientWidth + 'px';
-  mirror.style.left = '-9999px';
-  mirror.style.top = '0';
-  document.body.appendChild(mirror);
-
-  mirror.appendChild(document.createTextNode(value.slice(0, idx)));
-  const marker = document.createElement('span');
-  marker.textContent = value.slice(idx, idx + len) || '​';
-  mirror.appendChild(marker);
-  mirror.appendChild(document.createTextNode(value.slice(idx + marker.textContent.length)));
-
-  const markerTop = marker.offsetTop;
-  const markerHeight = marker.offsetHeight || parseFloat(cs.lineHeight) || 20;
-  document.body.removeChild(mirror);
-
-  const maxScroll = Math.max(0, textarea.scrollHeight - textarea.clientHeight);
-  const target = markerTop - (textarea.clientHeight / 2) + (markerHeight / 2);
-  const desiredScroll = Math.max(0, Math.min(target, maxScroll));
-  textarea.scrollTop = desiredScroll;
-  setOutputHighlight(searchText);
-}
+window.addEventListener('resize', () => rebuildHighlightRects());
 
 // Scorre il form in modo che la categoria del flag appena cliccato si porti sempre alla
 // stessa altezza fissa dalla cima della pagina (o della colonna del form su desktop),
@@ -1467,7 +1512,7 @@ function resetAll(){
   for(const k in state) state[k] = [];
   manualEdit = false;
   render();
-  setOutputHighlight(null);
+  clearOutputHighlight();
 }
 
 function escapeHtml(str){
@@ -1594,7 +1639,7 @@ async function loadConsegna(id){
     document.getElementById('output').value = item.testo || '';
     manualEdit = true;
   }
-  setOutputHighlight(null);
+  clearOutputHighlight();
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
