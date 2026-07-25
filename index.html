@@ -583,11 +583,12 @@
       </div>
     </div>
 
-    <div class="group" data-group="U-via-enterale-sel" data-mode="radio">
+    <div class="group" data-group="U-via-enterale-sel" data-mode="checkbox">
       <div class="group-label">Accesso enterale</div>
       <div class="flags">
         <span class="flag" data-text="tramite SNG" data-sub="U-via-stato U-ristagno">SNG</span>
         <span class="flag" data-text="tramite gastrostomia" data-sub="U-via-stato U-ristagno">Gastrostomia</span>
+        <span class="flag" data-text="tramite sondino NAVA" data-sub="U-via-stato U-ristagno">Sondino NAVA</span>
       </div>
       <div class="sub-flags" id="U-via-stato" data-group="U-via-stato-sel" data-mode="radio">
         <div class="sub-label">Stato</div>
@@ -795,24 +796,72 @@ const sb = window.supabase.createClient(
 
 const state = {};
 
-// La consegna è divisa in 6 sezioni di testo indipendenti, sempre nello stesso ordine
-// fisso. Se una sezione viene modificata a mano, resta "congelata" com'è (manualSections)
-// finché non si clicca un chip di QUELLA sezione (che la scongela e la fa tornare
-// automatica): le altre sezioni continuano ad aggiornarsi normalmente nel frattempo.
+// La consegna è divisa in 6 sezioni fisse (Neurologico, Ventilazione, Circolo, Diuresi,
+// Drenaggi, Attività), sempre nello stesso ordine. Dentro ogni sezione, le categorie che
+// non si influenzano a vicenda (es. in Ventilazione: supporto ventilatorio, saturazione,
+// secrezioni, scialorrea) sono a loro volta tracciate come "pezzi" indipendenti, così
+// modificarne uno a mano non tocca gli altri. Fa eccezione il Neurologico, dove stato di
+// coscienza/reattività/agitazione restano volutamente nella stessa frase.
+// Una modifica manuale che non si riesce ad attribuire in modo chiaro a un singolo pezzo
+// (es. cancellata una riga intera, o la modifica attraversa più pezzi) congela l'intera
+// sezione come blocco unico, sotto la chiave della sezione stessa.
 const SECTION_ORDER = ['neuro', 'vent', 'circolo', 'diuresi', 'drenaggi', 'attivita'];
-let manualSections = {};      // chiave sezione -> testo congelato
-let lastRenderedPieces = [];  // [{key, text}] righe attualmente mostrate, in ordine
+let manualSections = {};      // chiave sezione o pezzo -> testo congelato
+let lastRenderedPieces = [];  // [{key, text, subPieces}] righe attualmente mostrate, in ordine
 let extraTrailingText = '';   // eventuale testo extra scritto a mano oltre le righe note
 
-function sectionKeyForGroup(name){
-  if(!name) return null;
-  if(name.startsWith('N-') || name === 'eta-val') return 'neuro';
-  if(name.startsWith('V-') || ['fio2-val','peep-val','sopra-peep-val','flusso-val','atti-val','o2-lmin-val','modalita-val'].includes(name)) return 'vent';
-  if(name.startsWith('C-') || name === 'temp-val') return 'circolo';
-  if(name.startsWith('U-') || name === 'ristagno-qta-val') return 'diuresi';
-  if(name.startsWith('AC-') || ['tor-asp-val','tor-qta-val','add-asp-val','add-qta-val','cra-asp-val','cra-qta-val','alt-asp-val','alt-qta-val','altro-sede-val'].includes(name)) return 'drenaggi';
-  if(name.startsWith('T-')) return 'attivita';
+// Dato il gruppo di stato (o l'id di un campo) appena cliccato/compilato, restituisce le
+// chiavi dei "pezzi" da scongelare (tornano automatici). Più di una chiave quando lo stesso
+// campo può contribuire a pezzi diversi a seconda del resto dello stato: scongelarli
+// entrambi è innocuo (chi non era congelato resta un no-op).
+function pieceKeysForGroup(name){
+  if(!name) return [];
+  if(name === 'eta-val') return ['neuro-open'];
+  if(name.startsWith('N-')) return ['neuro'];
+  if(name === 'V-spo2') return ['V-spo2'];
+  if(name === 'V-secrezioni' || name === 'V-aspetto-sel') return ['V-secrezioni'];
+  if(name === 'V-scialorrea') return ['V-scialorrea'];
+  if(name.startsWith('V-') || ['fio2-val','peep-val','sopra-peep-val','flusso-val','atti-val','o2-lmin-val','modalita-val'].includes(name)) return ['V-supporto'];
+  if(name === 'C-cute') return ['C-cute'];
+  if(name === 'C-temp' || name === 'temp-val') return ['C-temp'];
+  if(name.startsWith('C-')) return ['C-stato'];
+  if(name === 'U-alvo' || name === 'U-feci-sel') return ['U-alvo'];
+  if(['U-via-enterale-sel','U-via-stato-sel','U-ristagno-sel','ristagno-qta-val'].includes(name)) return ['U-alimentazione', 'U-accesso'];
+  if(name === 'U-alimentazione') return ['U-alimentazione'];
+  if(['U-diuresi','U-lasix','U-urine','U-quantita'].includes(name)) return ['U-diuresi'];
+  if(['AC-tor-aspirazione','AC-tor-drenato','tor-asp-val','tor-qta-val'].includes(name)) return ['AC-toracico'];
+  if(['AC-add-aspirazione','AC-add-drenato','add-asp-val','add-qta-val'].includes(name)) return ['AC-addominale'];
+  if(['AC-cra-aspirazione','AC-cra-drenato','cra-asp-val','cra-qta-val'].includes(name)) return ['AC-cranico'];
+  if(['AC-alt-aspirazione','AC-alt-drenato','alt-asp-val','alt-qta-val','altro-sede-val'].includes(name)) return ['AC-altro'];
+  if(name === 'AC-drenaggi') return ['AC-toracico','AC-addominale','AC-cranico','AC-altro'];
+  if(name === 'T-medicazione-dispositivi') return ['T-medicazione-dispositivi'];
+  if(name === 'T-esami') return ['T-esami'];
+  if(name === 'T-assistenza') return ['T-assistenza'];
+  return [];
+}
+
+// Data la chiave di un pezzo, la sezione fissa a cui appartiene: serve a scongelare anche
+// il blocco intero se la sezione era stata congelata tutta insieme (modifica ambigua, non
+// attribuibile a un singolo pezzo) — altrimenti scongelare solo il pezzo non avrebbe alcun
+// effetto visibile, dato che il blocco intero avrebbe comunque la precedenza.
+function sectionKeyForPieceKey(pieceKey){
+  if(pieceKey === 'neuro' || pieceKey === 'neuro-open') return 'neuro';
+  if(pieceKey.startsWith('V-')) return 'vent';
+  if(pieceKey.startsWith('C-')) return 'circolo';
+  if(pieceKey.startsWith('U-')) return 'diuresi';
+  if(pieceKey.startsWith('AC-')) return 'drenaggi';
+  if(pieceKey.startsWith('T-')) return 'attivita';
   return null;
+}
+
+function unfreezePieceKeys(pieceKeys){
+  const sections = new Set();
+  pieceKeys.forEach(k => {
+    delete manualSections[k];
+    const s = sectionKeyForPieceKey(k);
+    if(s) sections.add(s);
+  });
+  sections.forEach(s => delete manualSections[s]);
 }
 
 // Niente barra AutoFill (contatti/password) sopra la tastiera. Il trucco è type="search":
@@ -917,7 +966,10 @@ document.querySelectorAll('.flag').forEach(flag => {
     }
 
     highlightSource = groupName;
-    delete manualSections[sectionKeyForGroup(groupName)];
+    // Il gruppo "AC-drenaggi" (quale drenaggio è presente) non basta da solo a sapere QUALE
+    // drenaggio scongelare: usiamo il testo del flag appena cliccato (es. "toracico").
+    const pieceKeys = groupName === 'AC-drenaggi' ? ['AC-' + flag.dataset.text] : pieceKeysForGroup(groupName);
+    unfreezePieceKeys(pieceKeys);
     render();
     // Si ancora al ".group" più esterno (non al gruppo/sotto-pannello più vicino usato per
     // la logica di stato): categorie come Emodinamica o Diuresi hanno più contenitori
@@ -934,7 +986,7 @@ document.querySelectorAll('.flag').forEach(flag => {
   const el = document.getElementById(id);
   if(el) el.addEventListener('input', () => {
     highlightSource = id;
-    delete manualSections[sectionKeyForGroup(id)];
+    unfreezePieceKeys(pieceKeysForGroup(id));
     render();
   });
 });
@@ -1063,10 +1115,41 @@ function updateVentParamsVisibility(){
   });
 }
 
-function render(){
-  const lines = [];
+// Costruisce il testo finale di una sezione a partire dai suoi "pezzi" (categorie
+// indipendenti), rispettando eventuali congelamenti per singolo pezzo (usati com'è, senza
+// applicare concordanza di genere o maiuscole: è testo scritto a mano, va rispettato).
+// Restituisce anche i confini di ciascun pezzo sopravvissuto, in caratteri "puliti" (senza
+// marcatori), usati più tardi per capire quale pezzo è stato toccato se l'utente modifica
+// la riga a mano.
+function finalizeSection(pieces, joiner, perPiecePeriod, sesso){
+  const rendered = [];
+  pieces.forEach(p => {
+    let t;
+    if(Object.prototype.hasOwnProperty.call(manualSections, p.pieceKey)){
+      t = manualSections[p.pieceKey];
+    } else {
+      t = sesso === 'F' ? feminizeText(p.text) : p.text;
+      t = capitalizeSentences(t);
+      if(perPiecePeriod && t) t += '.';
+    }
+    if(t !== '') rendered.push({ pieceKey: p.pieceKey, text: t });
+  });
+  if(!rendered.length) return null;
+  let cleanPos = 0;
+  const subPieces = [];
+  rendered.forEach(r => {
+    const cleanLen = r.text.split(MARK_START).join('').split(MARK_END).join('').length;
+    subPieces.push({ pieceKey: r.pieceKey, start: cleanPos, end: cleanPos + cleanLen });
+    cleanPos += cleanLen + joiner.length;
+  });
+  let text = rendered.map(r => r.text).join(joiner);
+  if(!perPiecePeriod) text += '.';
+  return { text, subPieces };
+}
 
-  // 1 - Neurologico
+function render(){
+  // 1 - Neurologico (stato di coscienza/reattività/agitazione restano volutamente uniti:
+  // sono descrizioni della stessa osservazione, non categorie indipendenti tra loro)
   let nParts = [];
   if(state['N-coscienza'] && state['N-coscienza'].length){
     let coscienzaArr = state['N-coscienza'].slice();
@@ -1080,7 +1163,6 @@ function render(){
   if(state['N-reattivita'] && state['N-reattivita'][0]) nParts.push(mark(sourceMatches('N-reattivita'), state['N-reattivita'][0]));
   if(state['N-agitazione'] && state['N-agitazione'][0]) nParts.push(mark(sourceMatches('N-agitazione'), state['N-agitazione'][0]));
   if(state['N-consolabilita'] && state['N-consolabilita'][0]) nParts.push(mark(sourceMatches('N-consolabilita'), state['N-consolabilita'][0]));
-  if(nParts.length) lines.push({ key: 'neuro', text: capitalize(joinPhrases(nParts, ', ')) + '.' });
 
   // 2 - Ventilazione
   let vParts = [];
@@ -1131,14 +1213,14 @@ function render(){
       } else {
         supTxt = vSupporto;
       }
-      vParts.push(mark(sourceMatches(...V_SUPPORTO_KEYS), supTxt + (paramBits.length ? ` (${paramBits.join(', ')})` : '')));
+      vParts.push({ pieceKey: 'V-supporto', text: mark(sourceMatches(...V_SUPPORTO_KEYS), supTxt + (paramBits.length ? ` (${paramBits.join(', ')})` : '')) });
     } else {
-      vParts.push(mark(sourceMatches(...V_SUPPORTO_KEYS), vSupporto));
+      vParts.push({ pieceKey: 'V-supporto', text: mark(sourceMatches(...V_SUPPORTO_KEYS), vSupporto) });
     }
   }
 
   let vSpo2 = state['V-spo2'] && state['V-spo2'][0];
-  if(vSpo2) vParts.push(mark(sourceMatches('V-spo2'), vSpo2));
+  if(vSpo2) vParts.push({ pieceKey: 'V-spo2', text: mark(sourceMatches('V-spo2'), vSpo2) });
 
   let vSecr = state['V-secrezioni'] && state['V-secrezioni'][0];
   if(vSecr){
@@ -1157,14 +1239,12 @@ function render(){
       });
       secrBits.push(joinItalian(ordered));
     }
-    vParts.push(mark(sourceMatches('V-secrezioni', 'V-aspetto-sel'), secrBits.join(', ')));
+    vParts.push({ pieceKey: 'V-secrezioni', text: mark(sourceMatches('V-secrezioni', 'V-aspetto-sel'), secrBits.join(', ')) });
   }
 
   if(state['V-scialorrea'] && state['V-scialorrea'].length){
-    vParts.push(mark(sourceMatches('V-scialorrea'), 'presenta abbondante scialorrea'));
+    vParts.push({ pieceKey: 'V-scialorrea', text: mark(sourceMatches('V-scialorrea'), 'presenta abbondante scialorrea') });
   }
-
-  if(vParts.length) lines.push({ key: 'vent', text: capitalize(joinPhrases(vParts, '. ')) + '.' });
 
   // 3 - Circolo
   let cParts = [];
@@ -1175,21 +1255,20 @@ function render(){
     const prefix = hasArteria ? 'emodinamica' : 'pressione arteriosa';
     let stateTxt = `${prefix} ${cStatoWord}`;
     if(hasAmine) stateTxt += ', sostenuta da ammine';
-    cParts.push(mark(sourceMatches('C-stato', 'C-catetere-arterioso', 'C-amine'), stateTxt));
+    cParts.push({ pieceKey: 'C-stato', text: mark(sourceMatches('C-stato', 'C-catetere-arterioso', 'C-amine'), stateTxt) });
   } else if(hasAmine){
-    cParts.push(mark(sourceMatches('C-amine'), 'sostenuta da ammine'));
+    cParts.push({ pieceKey: 'C-stato', text: mark(sourceMatches('C-amine'), 'sostenuta da ammine') });
   }
-  if(state['C-cute'] && state['C-cute'][0]) cParts.push(mark(sourceMatches('C-cute'), state['C-cute'][0]));
+  if(state['C-cute'] && state['C-cute'][0]) cParts.push({ pieceKey: 'C-cute', text: mark(sourceMatches('C-cute'), state['C-cute'][0]) });
   let cTemp = state['C-temp'] && state['C-temp'][0];
   const tempVal = document.getElementById('temp-val').value;
   if(cTemp === 'apiretico'){
-    cParts.push(mark(sourceMatches('C-temp', 'temp-val'), 'apiretico'));
+    cParts.push({ pieceKey: 'C-temp', text: mark(sourceMatches('C-temp', 'temp-val'), 'apiretico') });
   } else if(cTemp){
-    cParts.push(mark(sourceMatches('C-temp', 'temp-val'), tempVal ? `${cTemp}, TC ${tempVal}°C` : cTemp));
+    cParts.push({ pieceKey: 'C-temp', text: mark(sourceMatches('C-temp', 'temp-val'), tempVal ? `${cTemp}, TC ${tempVal}°C` : cTemp) });
   } else if(tempVal){
-    cParts.push(mark(sourceMatches('C-temp', 'temp-val'), `TC ${tempVal}°C`));
+    cParts.push({ pieceKey: 'C-temp', text: mark(sourceMatches('C-temp', 'temp-val'), `TC ${tempVal}°C`) });
   }
-  if(cParts.length) lines.push({ key: 'circolo', text: capitalize(joinPhrases(cParts, '. ')) + '.' });
 
   // 4 - Diuresi, alimentazione, alvo
   let uParts = [];
@@ -1201,20 +1280,27 @@ function render(){
     if(state['U-lasix'] && state['U-lasix'].length) diuresiTxt += ', stimolata da Lasix';
     let urineBits = [uQuantita, uUrine].filter(Boolean);
     if(urineBits.length) diuresiTxt += ', ' + urineBits.join(', ');
-    uParts.push(mark(sourceMatches('U-diuresi', 'U-lasix', 'U-urine', 'U-quantita'), diuresiTxt));
+    uParts.push({ pieceKey: 'U-diuresi', text: mark(sourceMatches('U-diuresi', 'U-lasix', 'U-urine', 'U-quantita'), diuresiTxt) });
   } else if(state['U-lasix'] && state['U-lasix'].length){
-    uParts.push(mark(sourceMatches('U-lasix'), 'in terapia con Lasix'));
+    uParts.push({ pieceKey: 'U-diuresi', text: mark(sourceMatches('U-lasix'), 'in terapia con Lasix') });
   }
 
   let uAlimArr = state['U-alimentazione'] || [];
-  let uVia = state['U-via-enterale-sel'] && state['U-via-enterale-sel'][0];
-  const hasDeviceForRistagno = uVia === 'tramite SNG' || uVia === 'tramite gastrostomia';
+  // Un paziente può avere più accessi enterali insieme (es. SNG e gastrostomia), non sempre
+  // legati alla nutrizione: stato e ristagno restano campi unici condivisi tra gli accessi
+  // selezionati (non tracciati per singolo dispositivo, per non complicare troppo il form).
+  let uViaArr = state['U-via-enterale-sel'] || [];
+  const DEVICE_LABELS = { 'tramite SNG': 'SNG', 'tramite gastrostomia': 'gastrostomia', 'tramite sondino NAVA': 'sondino NAVA' };
+  const DEVICE_PREP = { 'tramite SNG': 'dal SNG', 'tramite gastrostomia': 'dalla gastrostomia', 'tramite sondino NAVA': 'dal sondino NAVA' };
+  const hasDeviceForRistagno = uViaArr.length > 0;
   let uViaStato = hasDeviceForRistagno ? (state['U-via-stato-sel'] && state['U-via-stato-sel'][0]) : '';
-  if(uViaStato === 'chiuso' && uVia === 'tramite gastrostomia') uViaStato = 'chiusa';
+  // "chiuso/a" concorda con il genere del dispositivo: femminile solo se l'unico accesso
+  // selezionato è la gastrostomia (SNG e sondino NAVA sono maschili).
+  if(uViaStato === 'chiuso' && uViaArr.includes('tramite gastrostomia') && !uViaArr.some(v => v !== 'tramite gastrostomia')) uViaStato = 'chiusa';
   const ristagnoTxt = hasDeviceForRistagno ? (state['U-ristagno-sel'] && state['U-ristagno-sel'][0]) : '';
-  const viaMentionedInAlim = uAlimArr.includes('in nutrizione enterale') && !!uVia;
-  const deviceLabel = uVia === 'tramite SNG' ? 'SNG' : 'gastrostomia';
-  const devicePrep = uVia === 'tramite SNG' ? 'dal SNG' : 'dalla gastrostomia';
+  const viaMentionedInAlim = uAlimArr.includes('in nutrizione enterale') && uViaArr.length > 0;
+  const deviceLabel = joinItalian(uViaArr.map(v => DEVICE_LABELS[v]));
+  const devicePrep = joinItalian(uViaArr.map(v => DEVICE_PREP[v]));
 
   const ristagnoQta = document.getElementById('ristagno-qta-val').value;
   const ristagnoQtySuffix = ristagnoQta ? ` (${ristagnoQta} ml)` : '';
@@ -1229,7 +1315,7 @@ function render(){
       const extraBits = [];
       if(uViaStato) extraBits.push(uViaStato);
       extraBits.push(ristagnoTxt ? ('presente ' + ristagnoTxt + ristagnoQtySuffix) : 'ben tollerata');
-      enteraleExtra = ` ${uVia}, ` + extraBits.join(', ');
+      enteraleExtra = ` tramite ${deviceLabel}, ` + extraBits.join(', ');
     }
     // biberon e al seno, se scelti insieme, si uniscono con "e" sotto un unico "si
     // alimenta" invece di ripetersi separati (es. "si alimenta tramite biberon e al seno").
@@ -1250,12 +1336,12 @@ function render(){
       }
     });
     const alimTxt = displayArr.join(', ');
-    uParts.push(mark(sourceMatches('U-alimentazione', ...ACCESSO_KEYS), alimTxt));
+    uParts.push({ pieceKey: 'U-alimentazione', text: mark(sourceMatches('U-alimentazione', ...ACCESSO_KEYS), alimTxt) });
   }
 
   // stato (chiuso/a caduta) e ristagno quando l'accesso digestivo non è legato
   // alla nutrizione enterale (es. a digiuno, per os, nessuna alimentazione selezionata)
-  if(uVia && !viaMentionedInAlim){
+  if(uViaArr.length && !viaMentionedInAlim){
     let accessoTxt;
     if(uViaStato){
       const ristagnoPart = ristagnoTxt ? ('presenta ' + ristagnoTxt + ristagnoQtySuffix) : '';
@@ -1265,7 +1351,7 @@ function render(){
     } else {
       accessoTxt = `${deviceLabel} in sede`;
     }
-    uParts.push(mark(sourceMatches(...ACCESSO_KEYS), accessoTxt));
+    uParts.push({ pieceKey: 'U-accesso', text: mark(sourceMatches(...ACCESSO_KEYS), accessoTxt) });
   }
 
   let uAlvo = state['U-alvo'] && state['U-alvo'][0];
@@ -1276,10 +1362,8 @@ function render(){
     const feciBits = [];
     if(consistenza.length) feciBits.push('feci ' + joinItalian(consistenza));
     feciBits.push(...altro);
-    uParts.push(mark(sourceMatches('U-alvo', 'U-feci-sel'), feciBits.length ? `${uAlvo}, ${joinPhrases(feciBits)}` : uAlvo));
+    uParts.push({ pieceKey: 'U-alvo', text: mark(sourceMatches('U-alvo', 'U-feci-sel'), feciBits.length ? `${uAlvo}, ${joinPhrases(feciBits)}` : uAlvo) });
   }
-
-  if(uParts.length) lines.push({ key: 'diuresi', text: capitalize(joinPhrases(uParts, '. ')) + '.' });
 
   // 5 - Drenaggi (each selected drain has its own independent detail)
   let acParts = [];
@@ -1288,7 +1372,7 @@ function render(){
     addominale: { label: 'drenaggio addominale', asp: 'AC-add-aspirazione', dren: 'AC-add-drenato', aspId: 'add-asp-val', qtaId: 'add-qta-val' },
     cranico:    { label: 'drenaggio cranico',    asp: 'AC-cra-aspirazione', dren: 'AC-cra-drenato', aspId: 'cra-asp-val', qtaId: 'cra-qta-val' }
   };
-  function buildDrenaggio(label, aspGroup, drenGroup, aspInputId, qtaInputId, extraKeys){
+  function buildDrenaggio(pieceKey, label, aspGroup, drenGroup, aspInputId, qtaInputId, extraKeys){
     let materialeTxt = '';
     let drenatoArr = (state[drenGroup] || []).slice();
     if(drenatoArr.length){
@@ -1317,77 +1401,92 @@ function render(){
     } else if(materialeTxt){
       str += `, drenato ${materialeTxt}`;
     }
-    return mark(sourceMatches('AC-drenaggi', aspGroup, drenGroup, aspInputId, qtaInputId, ...(extraKeys || [])), str);
+    return { pieceKey, text: mark(sourceMatches('AC-drenaggi', aspGroup, drenGroup, aspInputId, qtaInputId, ...(extraKeys || [])), str) };
   }
 
   (state['AC-drenaggi'] || []).forEach(d => {
     if(d === 'altro'){
       const sede = document.getElementById('altro-sede-val') ? document.getElementById('altro-sede-val').value.trim() : '';
       const label = sede ? `drenaggio ${sede}` : 'drenaggio';
-      acParts.push(buildDrenaggio(label, 'AC-alt-aspirazione', 'AC-alt-drenato', 'alt-asp-val', 'alt-qta-val', ['altro-sede-val']));
+      acParts.push(buildDrenaggio('AC-altro', label, 'AC-alt-aspirazione', 'AC-alt-drenato', 'alt-asp-val', 'alt-qta-val', ['altro-sede-val']));
     } else if(drenConfig[d]){
       const cfg = drenConfig[d];
-      acParts.push(buildDrenaggio(cfg.label, cfg.asp, cfg.dren, cfg.aspId, cfg.qtaId));
+      acParts.push(buildDrenaggio('AC-' + d, cfg.label, cfg.asp, cfg.dren, cfg.aspId, cfg.qtaId));
     }
   });
-
-  if(acParts.length) lines.push({ key: 'drenaggi', text: capitalize(acParts.map(p => p + '.').join(' ')) });
 
   // 6 - Attività di turno
   let tParts = [];
   let medDispArr = state['T-medicazione-dispositivi'] || [];
   if(medDispArr.length){
-    tParts.push(mark(sourceMatches('T-medicazione-dispositivi'), 'eseguita medicazione di ' + joinPhrases(medDispArr)));
+    tParts.push({ pieceKey: 'T-medicazione-dispositivi', text: mark(sourceMatches('T-medicazione-dispositivi'), 'eseguita medicazione di ' + joinPhrases(medDispArr)) });
   }
 
   if(state['T-esami'] && state['T-esami'].length){
     const strumentali = new Set(['fibroscopia', 'RX', 'TAC', 'risonanza magnetica', 'EEG']);
     const esamiArr = state['T-esami'].filter(t => !strumentali.has(t));
     const strumentaliArr = state['T-esami'].filter(t => strumentali.has(t));
-    esamiArr.forEach(a => tParts.push(mark(sourceMatches('T-esami'), a)));
-    if(strumentaliArr.length) tParts.push(mark(sourceMatches('T-esami'), 'eseguiti ' + joinItalian(strumentaliArr)));
+    const esamiBits = esamiArr.slice();
+    if(strumentaliArr.length) esamiBits.push('eseguiti ' + joinItalian(strumentaliArr));
+    tParts.push({ pieceKey: 'T-esami', text: mark(sourceMatches('T-esami'), esamiBits.join('. ')) });
   }
 
   if(state['T-assistenza'] && state['T-assistenza'].length){
-    state['T-assistenza'].forEach(a => tParts.push(mark(sourceMatches('T-assistenza'), a)));
-  }
-
-  if(tParts.length){
-    const sentence = tParts.map(t => capitalize(t) + '.').join(' ');
-    lines.push({ key: 'attivita', text: sentence });
+    tParts.push({ pieceKey: 'T-assistenza', text: mark(sourceMatches('T-assistenza'), state['T-assistenza'].join('. ')) });
   }
 
   const sesso = state['sesso'] && state['sesso'][0];
   const etaVal = document.getElementById('eta-val').value;
 
-  let finalLines = sesso === 'F'
-    ? lines.map(l => ({ key: l.key, text: feminizeText(l.text) }))
-    : lines.map(l => ({ key: l.key, text: l.text }));
-
-  const openWord = ageOpeningWord(etaVal, sesso);
-  if(openWord){
-    const markedOpenWord = mark(sourceMatches('eta-val'), openWord);
-    if(nParts.length && finalLines.length && finalLines[0].key === 'neuro'){
-      finalLines[0].text = markedOpenWord + ' ' + lowerFirstReal(finalLines[0].text);
-    } else {
-      finalLines.unshift({ key: 'neuro', text: markedOpenWord + '.' });
-    }
+  // Neurologico: l'età (se presente) e la frase su stato di coscienza/reattività/
+  // agitazione sono due pezzi separati (l'età si può congelare/scongelare per conto suo),
+  // ma quest'ultima non si divide ulteriormente, come deciso: restano nella stessa frase.
+  const neuroRendered = [];
+  if(Object.prototype.hasOwnProperty.call(manualSections, 'neuro-open')){
+    if(manualSections['neuro-open']) neuroRendered.push({ pieceKey: 'neuro-open', text: manualSections['neuro-open'] });
+  } else {
+    const openWord = ageOpeningWord(etaVal, sesso);
+    if(openWord) neuroRendered.push({ pieceKey: 'neuro-open', text: capitalizeSentences(mark(sourceMatches('eta-val'), openWord)) });
+  }
+  if(Object.prototype.hasOwnProperty.call(manualSections, 'neuro')){
+    if(manualSections['neuro']) neuroRendered.push({ pieceKey: 'neuro', text: manualSections['neuro'] });
+  } else if(nParts.length){
+    let t = sesso === 'F' ? feminizeText(joinPhrases(nParts, ', ')) : joinPhrases(nParts, ', ');
+    t = capitalizeSentences(t);
+    if(neuroRendered.length) t = lowerFirstReal(t); // segue l'apertura: "Paziente vigile...", non "Paziente Vigile..."
+    neuroRendered.push({ pieceKey: 'neuro', text: t });
+  }
+  let neuroSection = null;
+  if(neuroRendered.length){
+    let cleanPos = 0;
+    const subPieces = [];
+    neuroRendered.forEach(r => {
+      const cleanLen = r.text.split(MARK_START).join('').split(MARK_END).join('').length;
+      subPieces.push({ pieceKey: r.pieceKey, start: cleanPos, end: cleanPos + cleanLen });
+      cleanPos += cleanLen + 1; // joiner: uno spazio singolo
+    });
+    neuroSection = { text: neuroRendered.map(r => r.text).join(' ') + '.', subPieces };
   }
 
-  finalLines = finalLines.map(l => ({ key: l.key, text: capitalizeSentences(l.text) }));
+  const sectionResults = {
+    neuro: neuroSection,
+    vent: finalizeSection(vParts, '. ', false, sesso),
+    circolo: finalizeSection(cParts, '. ', false, sesso),
+    diuresi: finalizeSection(uParts, '. ', false, sesso),
+    drenaggi: finalizeSection(acParts, ' ', true, sesso),
+    attivita: finalizeSection(tParts, ' ', true, sesso)
+  };
 
-  // Assembla l'output rispettando l'ordine fisso delle sezioni: una sezione congelata a
-  // mano resta quella (anche se lo stato che l'aveva generata è nel frattempo svuotato),
-  // le altre usano la versione appena calcolata dallo stato.
-  const autoByKey = {};
-  finalLines.forEach(p => { autoByKey[p.key] = p.text; });
-
+  // Assembla l'output rispettando l'ordine fisso delle sezioni: una sezione congelata come
+  // blocco unico resta quella (anche se lo stato che l'aveva generata è nel frattempo
+  // svuotato); altrimenti si usa la versione appena calcolata, che già rispetta i
+  // congelamenti dei singoli pezzi al suo interno.
   const outputPieces = [];
   SECTION_ORDER.forEach(key => {
     if(Object.prototype.hasOwnProperty.call(manualSections, key)){
-      if(manualSections[key]) outputPieces.push({ key, text: manualSections[key] });
-    } else if(autoByKey[key]){
-      outputPieces.push({ key, text: autoByKey[key] });
+      if(manualSections[key]) outputPieces.push({ key, text: manualSections[key], subPieces: null });
+    } else if(sectionResults[key]){
+      outputPieces.push({ key, text: sectionResults[key].text, subPieces: sectionResults[key].subPieces });
     }
   });
 
@@ -1396,10 +1495,11 @@ function render(){
 
   lastRenderedPieces = outputPieces.map(p => ({
     key: p.key,
-    text: p.text.split(MARK_START).join('').split(MARK_END).join('')
+    text: p.text.split(MARK_START).join('').split(MARK_END).join(''),
+    subPieces: p.subPieces || null
   }));
   if(extraTrailingText){
-    extraTrailingText.split('\n').forEach((t, i) => lastRenderedPieces.push({ key: '_extra' + i, text: t }));
+    extraTrailingText.split('\n').forEach((t, i) => lastRenderedPieces.push({ key: '_extra' + i, text: t, subPieces: null }));
   }
 }
 
@@ -1437,25 +1537,49 @@ function applyRenderedText(markedText){
   scrollAndHighlightRange(textarea, range.start, range.end);
 }
 
-// Quando l'utente scrive a mano nella consegna, capiamo QUALE riga (sezione) ha toccato
-// confrontando posizione per posizione con l'ultimo testo mostrato: solo quella sezione
-// viene congelata, le altre continuano ad aggiornarsi automaticamente con i chip.
+// Quando l'utente scrive a mano nella consegna, capiamo QUALE riga ha toccato confrontando
+// posizione per posizione con l'ultimo testo mostrato. Se quella riga è divisa in più pezzi
+// (categorie indipendenti), troviamo con prefisso/suffisso comuni quale pezzo copre la
+// modifica e congeliamo solo quello; se la modifica è ambigua (attraversa più pezzi, o
+// tocca il punto finale) congeliamo l'intera riga come blocco unico, più sicuro.
 document.getElementById('output').addEventListener('input', () => {
   const textarea = document.getElementById('output');
   const currentLines = textarea.value.split('\n');
   const knownCount = lastRenderedPieces.length;
   for(let i = 0; i < Math.min(knownCount, currentLines.length); i++){
-    if(currentLines[i] !== lastRenderedPieces[i].text){
-      if(SECTION_ORDER.includes(lastRenderedPieces[i].key)) manualSections[lastRenderedPieces[i].key] = currentLines[i];
-      lastRenderedPieces[i] = { key: lastRenderedPieces[i].key, text: currentLines[i] };
+    const piece = lastRenderedPieces[i];
+    const newText = currentLines[i];
+    if(newText === piece.text) continue;
+    if(piece.subPieces && piece.subPieces.length){
+      const oldText = piece.text;
+      let s = 0;
+      const maxS = Math.min(oldText.length, newText.length);
+      while(s < maxS && oldText[s] === newText[s]) s++;
+      let oldEnd = oldText.length, newEnd = newText.length;
+      while(oldEnd > s && newEnd > s && oldText[oldEnd - 1] === newText[newEnd - 1]){ oldEnd--; newEnd--; }
+      const covering = piece.subPieces.filter(sp => sp.start < oldEnd && sp.end > s);
+      if(covering.length === 1){
+        const sp = covering[0];
+        const suffixLen = oldText.length - sp.end;
+        const newPieceEnd = Math.max(sp.start, newText.length - suffixLen);
+        manualSections[sp.pieceKey] = newText.slice(sp.start, newPieceEnd);
+      } else {
+        manualSections[piece.key] = newText;
+        piece.subPieces.forEach(sp => delete manualSections[sp.pieceKey]);
+      }
+    } else if(SECTION_ORDER.includes(piece.key)){
+      manualSections[piece.key] = newText;
     }
+    lastRenderedPieces[i] = { key: piece.key, text: newText, subPieces: piece.subPieces };
   }
   if(currentLines.length > knownCount){
     extraTrailingText = currentLines.slice(knownCount).join('\n');
   } else if(currentLines.length < knownCount){
-    // righe intere cancellate dalla fine: quelle sezioni tornano automatiche
+    // righe intere cancellate dalla fine: quelle sezioni (e i loro pezzi) tornano automatiche
     for(let i = currentLines.length; i < knownCount; i++){
-      delete manualSections[lastRenderedPieces[i].key];
+      const piece = lastRenderedPieces[i];
+      delete manualSections[piece.key];
+      if(piece.subPieces) piece.subPieces.forEach(sp => delete manualSections[sp.pieceKey]);
     }
     lastRenderedPieces = lastRenderedPieces.slice(0, currentLines.length);
     extraTrailingText = '';
