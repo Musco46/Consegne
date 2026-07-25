@@ -958,7 +958,7 @@ function render(){
           if(applies.includes('sopraPeep') && sopraPeep) paramBits.push(`sopra PEEP ${sopraPeep} cmH2O`);
         }
         if(applies.includes('flusso') && flusso) paramBits.push(`flusso ${flusso} L/min`);
-        if(applies.includes('atti') && atti) paramBits.push(`atti ${atti}/min`);
+        if(applies.includes('atti') && atti) paramBits.push(`${atti} atti/min`);
       }
       const modeVal = (currentDeviceKey() === 'astral' || currentDeviceKey() === 'invasiva') ? document.getElementById('modalita-val').value.trim() : '';
       let extraTxt = deviceTxt || viaTxt;
