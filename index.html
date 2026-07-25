@@ -747,6 +747,7 @@
         <span class="flag" data-text="RX">RX</span>
         <span class="flag" data-text="TAC">TAC</span>
         <span class="flag" data-text="risonanza magnetica">Risonanza magnetica</span>
+        <span class="flag" data-text="EEG">EEG</span>
       </div>
     </div>
 
@@ -1304,7 +1305,7 @@ function render(){
   }
 
   if(state['T-esami'] && state['T-esami'].length){
-    const strumentali = new Set(['fibroscopia', 'RX', 'TAC', 'risonanza magnetica']);
+    const strumentali = new Set(['fibroscopia', 'RX', 'TAC', 'risonanza magnetica', 'EEG']);
     const esamiArr = state['T-esami'].filter(t => !strumentali.has(t));
     const strumentaliArr = state['T-esami'].filter(t => strumentali.has(t));
     esamiArr.forEach(a => tParts.push(mark(sourceMatches('T-esami'), a)));
