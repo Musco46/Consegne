@@ -810,6 +810,15 @@ let manualSections = {};      // chiave sezione o pezzo -> testo congelato
 let lastRenderedPieces = [];  // [{key, text, subPieces}] righe attualmente mostrate, in ordine
 let extraTrailingText = '';   // eventuale testo extra scritto a mano oltre le righe note
 
+// Una frase scritta a mano TRA due categorie (senza toccare il testo di nessuna delle due)
+// non appartiene a nessun pezzo esistente: la teniamo come "pezzo fantasma" a sé, ancorato
+// alla posizione in cui è stata scritta (subito dopo un certo pezzo, o all'inizio della
+// sezione), così resta lì anche se una categoria vicina cambia o viene rigenerata.
+// Il testo vero e proprio vive in manualSections (come le altre voci congelate, per essere
+// salvato/ripristinato allo stesso modo); qui teniamo solo dove va reinserito.
+let gapAnchors = {}; // chiave pezzo fantasma -> { sectionKey, afterPieceKey (null = inizio sezione) }
+let gapCounter = 0;
+
 // Dato il gruppo di stato (o l'id di un campo) appena cliccato/compilato, restituisce le
 // chiavi dei "pezzi" da scongelare (tornano automatici). Più di una chiave quando lo stesso
 // campo può contribuire a pezzi diversi a seconda del resto dello stato: scongelarli
@@ -1115,13 +1124,40 @@ function updateVentParamsVisibility(){
   });
 }
 
+// Inserisce gli eventuali "pezzi fantasma" (frasi scritte a mano tra due categorie, che non
+// appartengono a nessuna delle due) nella lista dei pezzi reali di questa sezione, subito
+// dopo il pezzo a cui erano ancorati. Se quel pezzo non esiste più (es. categoria svuotata),
+// il testo non va perso: torna semplicemente in cima alla sezione. Il testo del pezzo
+// fantasma viene "ripulito" già al momento in cui viene catturato (vedi il listener della
+// textarea), quindi qui si comporta come un pezzo qualunque: stesso separatore standard
+// prima e dopo, nessun trattamento speciale.
+function insertGaps(sectionKey, renderedList){
+  const renderedKeys = new Set(renderedList.map(r => r.pieceKey));
+  const gapsByAnchor = {};
+  Object.keys(gapAnchors).forEach(gapKey => {
+    const info = gapAnchors[gapKey];
+    if(info.sectionKey !== sectionKey) return;
+    if(!Object.prototype.hasOwnProperty.call(manualSections, gapKey)) return;
+    const anchor = (info.afterPieceKey && renderedKeys.has(info.afterPieceKey)) ? info.afterPieceKey : '_start';
+    (gapsByAnchor[anchor] = gapsByAnchor[anchor] || []).push({ pieceKey: gapKey, text: manualSections[gapKey] });
+  });
+  const out = [];
+  (gapsByAnchor['_start'] || []).forEach(g => out.push(g));
+  renderedList.forEach(r => {
+    out.push({ pieceKey: r.pieceKey, text: r.text });
+    (gapsByAnchor[r.pieceKey] || []).forEach(g => out.push(g));
+  });
+  return out;
+}
+
 // Costruisce il testo finale di una sezione a partire dai suoi "pezzi" (categorie
 // indipendenti), rispettando eventuali congelamenti per singolo pezzo (usati com'è, senza
-// applicare concordanza di genere o maiuscole: è testo scritto a mano, va rispettato).
+// applicare concordanza di genere o maiuscole: è testo scritto a mano, va rispettato), più
+// eventuali pezzi fantasma, uniti come tutti gli altri con lo stesso separatore standard.
 // Restituisce anche i confini di ciascun pezzo sopravvissuto, in caratteri "puliti" (senza
-// marcatori), usati più tardi per capire quale pezzo è stato toccato se l'utente modifica
-// la riga a mano.
-function finalizeSection(pieces, joiner, perPiecePeriod, sesso){
+// marcatori), usati più tardi per capire cosa è stato toccato se l'utente modifica la riga
+// a mano.
+function finalizeSection(sectionKey, pieces, joiner, perPiecePeriod, sesso){
   const rendered = [];
   pieces.forEach(p => {
     let t;
@@ -1130,19 +1166,20 @@ function finalizeSection(pieces, joiner, perPiecePeriod, sesso){
     } else {
       t = sesso === 'F' ? feminizeText(p.text) : p.text;
       t = capitalizeSentences(t);
-      if(perPiecePeriod && t) t += '.';
     }
     if(t !== '') rendered.push({ pieceKey: p.pieceKey, text: t });
   });
-  if(!rendered.length) return null;
+  const withGaps = insertGaps(sectionKey, rendered);
+  if(!withGaps.length) return null;
+  const finalized = withGaps.map(r => ({ pieceKey: r.pieceKey, text: perPiecePeriod && r.text ? r.text + '.' : r.text }));
   let cleanPos = 0;
   const subPieces = [];
-  rendered.forEach(r => {
+  finalized.forEach(r => {
     const cleanLen = r.text.split(MARK_START).join('').split(MARK_END).join('').length;
     subPieces.push({ pieceKey: r.pieceKey, start: cleanPos, end: cleanPos + cleanLen });
     cleanPos += cleanLen + joiner.length;
   });
-  let text = rendered.map(r => r.text).join(joiner);
+  let text = finalized.map(r => r.text).join(joiner);
   if(!perPiecePeriod) text += '.';
   return { text, subPieces };
 }
@@ -1456,25 +1493,26 @@ function render(){
     if(neuroRendered.length) t = lowerFirstReal(t); // segue l'apertura: "Paziente vigile...", non "Paziente Vigile..."
     neuroRendered.push({ pieceKey: 'neuro', text: t });
   }
+  const neuroWithGaps = insertGaps('neuro', neuroRendered);
   let neuroSection = null;
-  if(neuroRendered.length){
+  if(neuroWithGaps.length){
     let cleanPos = 0;
     const subPieces = [];
-    neuroRendered.forEach(r => {
+    neuroWithGaps.forEach(r => {
       const cleanLen = r.text.split(MARK_START).join('').split(MARK_END).join('').length;
       subPieces.push({ pieceKey: r.pieceKey, start: cleanPos, end: cleanPos + cleanLen });
-      cleanPos += cleanLen + 1; // joiner: uno spazio singolo
+      cleanPos += cleanLen + 1; // separatore: uno spazio singolo
     });
-    neuroSection = { text: neuroRendered.map(r => r.text).join(' ') + '.', subPieces };
+    neuroSection = { text: neuroWithGaps.map(r => r.text).join(' ') + '.', subPieces };
   }
 
   const sectionResults = {
     neuro: neuroSection,
-    vent: finalizeSection(vParts, '. ', false, sesso),
-    circolo: finalizeSection(cParts, '. ', false, sesso),
-    diuresi: finalizeSection(uParts, '. ', false, sesso),
-    drenaggi: finalizeSection(acParts, ' ', true, sesso),
-    attivita: finalizeSection(tParts, ' ', true, sesso)
+    vent: finalizeSection('vent', vParts, '. ', false, sesso),
+    circolo: finalizeSection('circolo', cParts, '. ', false, sesso),
+    diuresi: finalizeSection('diuresi', uParts, '. ', false, sesso),
+    drenaggi: finalizeSection('drenaggi', acParts, ' ', true, sesso),
+    attivita: finalizeSection('attivita', tParts, ' ', true, sesso)
   };
 
   // Assembla l'output rispettando l'ordine fisso delle sezioni: una sezione congelata come
@@ -1559,13 +1597,35 @@ document.getElementById('output').addEventListener('input', () => {
       while(oldEnd > s && newEnd > s && oldText[oldEnd - 1] === newText[newEnd - 1]){ oldEnd--; newEnd--; }
       const covering = piece.subPieces.filter(sp => sp.start < oldEnd && sp.end > s);
       if(covering.length === 1){
+        // tocca un solo pezzo esistente (reale o già fantasma): aggiorna solo quello
         const sp = covering[0];
         const suffixLen = oldText.length - sp.end;
         const newPieceEnd = Math.max(sp.start, newText.length - suffixLen);
         manualSections[sp.pieceKey] = newText.slice(sp.start, newPieceEnd);
+      } else if(covering.length === 0){
+        // scritto nello spazio VUOTO tra due pezzi (o prima del primo/dopo l'ultimo): non
+        // appartiene a nessuna categoria, resta un pezzo fantasma a sé, ancorato al pezzo
+        // precedente, così non viene toccato quando si clicca un chip di quelle vicine.
+        // ripulita da spazi/punteggiatura di bordo ridondanti: verrà unita agli altri pezzi
+        // con il normale separatore della sezione, non deve portarsi dietro il proprio
+        // (altrimenti, unita con quello standard, risulterebbe doppia o mancante).
+        const gapText = newText.slice(s, newEnd).trim().replace(/^[.!?]+\s*/, '').replace(/[.!?]+\s*$/, '');
+        if(gapText){
+          const anchorPiece = piece.subPieces.filter(sp => sp.end <= s).sort((a, b) => b.end - a.end)[0];
+          const afterPieceKey = anchorPiece ? anchorPiece.pieceKey : null;
+          let gapKey = Object.keys(gapAnchors).find(k =>
+            gapAnchors[k].sectionKey === piece.key && gapAnchors[k].afterPieceKey === afterPieceKey
+          );
+          if(!gapKey){
+            gapKey = '_gap' + (gapCounter++);
+            gapAnchors[gapKey] = { sectionKey: piece.key, afterPieceKey };
+          }
+          manualSections[gapKey] = gapText;
+        }
       } else {
+        // modifica ambigua, attraversa più pezzi reali: congela l'intera riga come blocco
         manualSections[piece.key] = newText;
-        piece.subPieces.forEach(sp => delete manualSections[sp.pieceKey]);
+        piece.subPieces.forEach(sp => { delete manualSections[sp.pieceKey]; delete gapAnchors[sp.pieceKey]; });
       }
     } else if(SECTION_ORDER.includes(piece.key)){
       manualSections[piece.key] = newText;
@@ -1782,6 +1842,7 @@ function resetAll(){
   document.querySelectorAll('input[type=number], input[type=text], input[type=search]').forEach(i => i.value = '');
   for(const k in state) state[k] = [];
   manualSections = {};
+  gapAnchors = {};
   lastRenderedPieces = [];
   extraTrailingText = '';
   highlightSource = null;
@@ -1811,7 +1872,7 @@ async function saveConsegna(){
     // "groups" sono i flag selezionati; manualSections/extraTrailingText sono le sezioni
     // modificate a mano, che altrimenti andrebbero perse ricaricando la consegna (senza
     // di loro il caricamento rigenera tutto da zero dai soli flag, ignorando le modifiche).
-    stato: JSON.parse(JSON.stringify({ groups: state, manualSections, extraTrailingText })),
+    stato: JSON.parse(JSON.stringify({ groups: state, manualSections, extraTrailingText, gapAnchors })),
     inputs: collectInputs()
   });
   if(!error){
@@ -1910,15 +1971,17 @@ async function loadConsegna(id){
   document.getElementById('eta-val').value = item.eta || '';
   highlightSource = null;
   manualSections = {};
+  gapAnchors = {};
   lastRenderedPieces = [];
   extraTrailingText = '';
   if(item.stato && Object.keys(item.stato).length){
-    // formato nuovo: { groups, manualSections, extraTrailingText }. Formato vecchio
-    // (consegne salvate prima di questa modifica): item.stato è direttamente i "groups",
-    // senza sezioni congelate salvate (si comporta come prima, tutto automatico).
+    // formato nuovo: { groups, manualSections, extraTrailingText, gapAnchors }. Formato
+    // vecchio (consegne salvate prima di questa modifica): item.stato è direttamente i
+    // "groups", senza sezioni congelate salvate (si comporta come prima, tutto automatico).
     const savedGroups = item.stato.groups || item.stato;
     applyState(savedGroups, item.inputs);
     manualSections = item.stato.manualSections ? JSON.parse(JSON.stringify(item.stato.manualSections)) : {};
+    gapAnchors = item.stato.gapAnchors ? JSON.parse(JSON.stringify(item.stato.gapAnchors)) : {};
     extraTrailingText = item.stato.extraTrailingText || '';
     render();
   } else {
