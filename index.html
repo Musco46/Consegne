@@ -1560,6 +1560,10 @@ function render(){
   });
 
   let markedFull = outputPieces.map(p => p.text).join('\n');
+  // Testo scritto a mano oltre l'ultima riga nota (o l'unico testo presente, se nessun
+  // chip è ancora stato selezionato da nessuna parte): senza questo, ogni render lo
+  // cancellava dalla textarea visibile pur continuando a tenerlo in memoria.
+  if(extraTrailingText) markedFull = markedFull ? markedFull + '\n' + extraTrailingText : extraTrailingText;
   applyRenderedText(markedFull);
 
   lastRenderedPieces = outputPieces.map(p => ({
