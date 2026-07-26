@@ -867,7 +867,10 @@ function pieceKeysForGroup(name){
   if(name === 'U-sng-stato') return ['U-alimentazione', 'U-sng'];
   if(name === 'U-gastro-stato') return ['U-alimentazione', 'U-gastro'];
   if(name === 'U-nava-stato') return ['U-alimentazione', 'U-nava'];
-  if(name === 'U-via-enterale-sel') return ['U-alimentazione', 'U-sng', 'U-gastro', 'U-nava', 'U-ristagno'];
+  // 'U-via-enterale-sel' (quale accesso è presente) non basta da solo a sapere QUALE
+  // accesso scongelare: il click handler usa il testo del flag appena cliccato (es.
+  // "tramite SNG") per scongelare solo quel dispositivo, senza toccare gli altri due né
+  // il Ristagno, che è una categoria a sé e non dipende da quale specifico accesso c'è.
   if(name === 'U-ristagno-sel' || name === 'ristagno-qta-val') return ['U-ristagno'];
   if(name === 'U-alimentazione') return ['U-alimentazione'];
   if(['U-diuresi','U-lasix','U-urine','U-quantita'].includes(name)) return ['U-diuresi'];
@@ -1008,9 +1011,14 @@ document.querySelectorAll('.flag').forEach(flag => {
     }
 
     highlightSource = groupName;
-    // Il gruppo "AC-drenaggi" (quale drenaggio è presente) non basta da solo a sapere QUALE
-    // drenaggio scongelare: usiamo il testo del flag appena cliccato (es. "toracico").
-    const pieceKeys = groupName === 'AC-drenaggi' ? ['AC-' + flag.dataset.text] : pieceKeysForGroup(groupName);
+    // I gruppi "AC-drenaggi" e "U-via-enterale-sel" (quale drenaggio/accesso è presente) non
+    // bastano da soli a sapere QUALE elemento scongelare: usiamo il testo del flag appena
+    // cliccato (es. "toracico", "tramite SNG") per scongelare solo quello, senza toccare gli
+    // altri elementi dello stesso gruppo.
+    const ACCESSO_PIECE_BY_TEXT = { 'tramite SNG': 'U-sng', 'tramite gastrostomia': 'U-gastro', 'tramite sondino NAVA': 'U-nava' };
+    const pieceKeys = groupName === 'AC-drenaggi' ? ['AC-' + flag.dataset.text]
+      : groupName === 'U-via-enterale-sel' ? ['U-alimentazione', ACCESSO_PIECE_BY_TEXT[flag.dataset.text]]
+      : pieceKeysForGroup(groupName);
     unfreezePieceKeys(pieceKeys);
     render();
     // Si ancora al ".group" più esterno (non al gruppo/sotto-pannello più vicino usato per
@@ -1157,24 +1165,47 @@ function updateVentParamsVisibility(){
   });
 }
 
+// Ordine fisso dei "pezzi" possibili all'interno di ciascuna sezione (anche quelli non
+// attivi in un dato momento): serve a finalizeSection per poter reinserire al posto giusto
+// un pezzo congelato a mano il cui chip generatore, altrove nella stessa sezione, è stato
+// nel frattempo deselezionato (es. si scrive a mano l'Alimentazione, poi si toglie
+// l'accesso enterale: senza questo elenco il pezzo sparirebbe, perché non verrebbe più
+// generato affatto, non perché è stato svuotato di proposito).
+const PIECE_ORDER = {
+  vent: ['V-supporto', 'V-spo2', 'V-secrezioni', 'V-scialorrea'],
+  circolo: ['C-stato', 'C-cute', 'C-temp'],
+  diuresi: ['U-diuresi', 'U-alimentazione', 'U-sng', 'U-gastro', 'U-nava', 'U-ristagno', 'U-alvo'],
+  drenaggi: ['AC-toracico', 'AC-addominale', 'AC-cranico', 'AC-altro'],
+  attivita: ['T-medicazione-dispositivi', 'T-esami', 'T-assistenza']
+};
+
 // Costruisce il testo finale di una sezione a partire dai suoi "pezzi" (categorie
 // indipendenti), rispettando eventuali congelamenti per singolo pezzo (usati com'è, senza
 // applicare concordanza di genere o maiuscole: è testo scritto a mano, va rispettato).
+// Un pezzo congelato a mano resta nell'output anche se, in questo render, il suo chip
+// generatore non produce più nulla (es. deselezionato altrove nella sezione): altrimenti
+// la modifica manuale sparirebbe senza che l'utente l'abbia toccata.
 // Restituisce anche i confini di ciascun pezzo sopravvissuto, in caratteri "puliti" (senza
 // marcatori), usati più tardi per capire quale pezzo è stato toccato se l'utente modifica
 // la riga a mano.
-function finalizeSection(pieces, joiner, perPiecePeriod, sesso){
+function finalizeSection(pieces, joiner, perPiecePeriod, sesso, sectionKey){
+  const byKey = {};
+  pieces.forEach(p => { byKey[p.pieceKey] = p.text; });
+  const order = (sectionKey && PIECE_ORDER[sectionKey]) || [];
+  const keys = order.filter(k => Object.prototype.hasOwnProperty.call(byKey, k) || Object.prototype.hasOwnProperty.call(manualSections, k));
+  pieces.forEach(p => { if(!keys.includes(p.pieceKey)) keys.push(p.pieceKey); });
+
   const rendered = [];
-  pieces.forEach(p => {
+  keys.forEach(pieceKey => {
     let t;
-    if(Object.prototype.hasOwnProperty.call(manualSections, p.pieceKey)){
-      t = manualSections[p.pieceKey];
+    if(Object.prototype.hasOwnProperty.call(manualSections, pieceKey)){
+      t = manualSections[pieceKey];
     } else {
-      t = sesso === 'F' ? feminizeText(p.text) : p.text;
+      t = sesso === 'F' ? feminizeText(byKey[pieceKey]) : byKey[pieceKey];
       t = capitalizeSentences(t);
       if(perPiecePeriod && t) t += '.';
     }
-    if(t !== '') rendered.push({ pieceKey: p.pieceKey, text: t });
+    if(t !== '') rendered.push({ pieceKey, text: t });
   });
   if(!rendered.length) return null;
   let cleanPos = 0;
@@ -1508,11 +1539,11 @@ function render(){
 
   const sectionResults = {
     neuro: neuroSection,
-    vent: finalizeSection(vParts, '. ', false, sesso),
-    circolo: finalizeSection(cParts, '. ', false, sesso),
-    diuresi: finalizeSection(uParts, '. ', false, sesso),
-    drenaggi: finalizeSection(acParts, ' ', true, sesso),
-    attivita: finalizeSection(tParts, ' ', true, sesso)
+    vent: finalizeSection(vParts, '. ', false, sesso, 'vent'),
+    circolo: finalizeSection(cParts, '. ', false, sesso, 'circolo'),
+    diuresi: finalizeSection(uParts, '. ', false, sesso, 'diuresi'),
+    drenaggi: finalizeSection(acParts, ' ', true, sesso, 'drenaggi'),
+    attivita: finalizeSection(tParts, ' ', true, sesso, 'attivita')
   };
 
   // Assembla l'output rispettando l'ordine fisso delle sezioni: una sezione congelata come
