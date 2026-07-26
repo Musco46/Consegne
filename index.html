@@ -586,24 +586,77 @@
     <div class="group" data-group="U-via-enterale-sel" data-mode="checkbox">
       <div class="group-label">Accesso enterale</div>
       <div class="flags">
-        <span class="flag" data-text="tramite SNG" data-sub="U-via-stato U-ristagno">SNG</span>
-        <span class="flag" data-text="tramite gastrostomia" data-sub="U-via-stato U-ristagno">Gastrostomia</span>
-        <span class="flag" data-text="tramite sondino NAVA" data-sub="U-via-stato U-ristagno">Sondino NAVA</span>
+        <span class="flag" data-text="tramite SNG" data-sub="U-acc-sng">SNG</span>
+        <span class="flag" data-text="tramite gastrostomia" data-sub="U-acc-gastro">Gastrostomia</span>
+        <span class="flag" data-text="tramite sondino NAVA" data-sub="U-acc-nava">Sondino NAVA</span>
       </div>
-      <div class="sub-flags" id="U-via-stato" data-group="U-via-stato-sel" data-mode="radio">
-        <div class="sub-label">Stato</div>
-        <div class="sub-flags-inner">
-        <span class="flag" data-text="chiuso">Chiuso</span>
-        <span class="flag" data-text="a caduta">A caduta</span>
+
+      <div class="sub-flags dren-detail" id="U-acc-sng">
+        <div class="sub-label">SNG</div>
+        <div class="mini-group" data-group="U-sng-nutrizione" data-mode="checkbox">
+          <div class="sub-flags-inner">
+          <span class="flag" data-text="in nutrizione enterale">Nutrizione</span>
+          </div>
+        </div>
+        <div class="mini-group" data-group="U-sng-stato" data-mode="radio">
+          <div class="sub-flags-inner">
+          <span class="flag" data-text="chiuso">Chiuso</span>
+          <span class="flag" data-text="a caduta">A caduta</span>
+          </div>
+        </div>
+        <div class="mini-group" data-group="U-sng-ristagno" data-mode="radio">
+          <div class="sub-flags-inner">
+          <span class="flag" data-text="ristagno alimentare">Alimentare</span>
+          <span class="flag" data-text="ristagno biliare">Biliare</span>
+          <span class="flag" data-text="ristagno ematico">Ematico</span>
+          <span class="inline-input">quantità <input type="text" inputmode="decimal" id="sng-ristagno-qta-val" placeholder="ml"></span>
+          </div>
         </div>
       </div>
-      <div class="sub-flags" id="U-ristagno" data-group="U-ristagno-sel" data-mode="radio">
-        <div class="sub-label">Ristagno</div>
-        <div class="sub-flags-inner">
-        <span class="flag" data-text="ristagno alimentare">Alimentare</span>
-        <span class="flag" data-text="ristagno biliare">Biliare</span>
-        <span class="flag" data-text="ristagno ematico">Ematico</span>
-        <span class="inline-input">quantità <input type="text" inputmode="decimal" id="ristagno-qta-val" placeholder="ml"></span>
+
+      <div class="sub-flags dren-detail" id="U-acc-gastro">
+        <div class="sub-label">Gastrostomia</div>
+        <div class="mini-group" data-group="U-gastro-nutrizione" data-mode="checkbox">
+          <div class="sub-flags-inner">
+          <span class="flag" data-text="in nutrizione enterale">Nutrizione</span>
+          </div>
+        </div>
+        <div class="mini-group" data-group="U-gastro-stato" data-mode="radio">
+          <div class="sub-flags-inner">
+          <span class="flag" data-text="chiuso">Chiuso</span>
+          <span class="flag" data-text="a caduta">A caduta</span>
+          </div>
+        </div>
+        <div class="mini-group" data-group="U-gastro-ristagno" data-mode="radio">
+          <div class="sub-flags-inner">
+          <span class="flag" data-text="ristagno alimentare">Alimentare</span>
+          <span class="flag" data-text="ristagno biliare">Biliare</span>
+          <span class="flag" data-text="ristagno ematico">Ematico</span>
+          <span class="inline-input">quantità <input type="text" inputmode="decimal" id="gastro-ristagno-qta-val" placeholder="ml"></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="sub-flags dren-detail" id="U-acc-nava">
+        <div class="sub-label">Sondino NAVA</div>
+        <div class="mini-group" data-group="U-nava-nutrizione" data-mode="checkbox">
+          <div class="sub-flags-inner">
+          <span class="flag" data-text="in nutrizione enterale">Nutrizione</span>
+          </div>
+        </div>
+        <div class="mini-group" data-group="U-nava-stato" data-mode="radio">
+          <div class="sub-flags-inner">
+          <span class="flag" data-text="chiuso">Chiuso</span>
+          <span class="flag" data-text="a caduta">A caduta</span>
+          </div>
+        </div>
+        <div class="mini-group" data-group="U-nava-ristagno" data-mode="radio">
+          <div class="sub-flags-inner">
+          <span class="flag" data-text="ristagno alimentare">Alimentare</span>
+          <span class="flag" data-text="ristagno biliare">Biliare</span>
+          <span class="flag" data-text="ristagno ematico">Ematico</span>
+          <span class="inline-input">quantità <input type="text" inputmode="decimal" id="nava-ristagno-qta-val" placeholder="ml"></span>
+          </div>
         </div>
       </div>
     </div>
@@ -826,7 +879,10 @@ function pieceKeysForGroup(name){
   if(name === 'C-temp' || name === 'temp-val') return ['C-temp'];
   if(name.startsWith('C-')) return ['C-stato'];
   if(name === 'U-alvo' || name === 'U-feci-sel') return ['U-alvo'];
-  if(['U-via-enterale-sel','U-via-stato-sel','U-ristagno-sel','ristagno-qta-val'].includes(name)) return ['U-alimentazione', 'U-accesso'];
+  if(['U-sng-nutrizione','U-sng-stato','U-sng-ristagno','sng-ristagno-qta-val'].includes(name)) return ['U-sng'];
+  if(['U-gastro-nutrizione','U-gastro-stato','U-gastro-ristagno','gastro-ristagno-qta-val'].includes(name)) return ['U-gastro'];
+  if(['U-nava-nutrizione','U-nava-stato','U-nava-ristagno','nava-ristagno-qta-val'].includes(name)) return ['U-nava'];
+  if(name === 'U-via-enterale-sel') return ['U-sng', 'U-gastro', 'U-nava'];
   if(name === 'U-alimentazione') return ['U-alimentazione'];
   if(['U-diuresi','U-lasix','U-urine','U-quantita'].includes(name)) return ['U-diuresi'];
   if(['AC-tor-aspirazione','AC-tor-drenato','tor-asp-val','tor-qta-val'].includes(name)) return ['AC-toracico'];
@@ -968,7 +1024,10 @@ document.querySelectorAll('.flag').forEach(flag => {
     highlightSource = groupName;
     // Il gruppo "AC-drenaggi" (quale drenaggio è presente) non basta da solo a sapere QUALE
     // drenaggio scongelare: usiamo il testo del flag appena cliccato (es. "toracico").
-    const pieceKeys = groupName === 'AC-drenaggi' ? ['AC-' + flag.dataset.text] : pieceKeysForGroup(groupName);
+    const ACCESSO_PIECE_BY_TEXT = { 'tramite SNG': 'U-sng', 'tramite gastrostomia': 'U-gastro', 'tramite sondino NAVA': 'U-nava' };
+    const pieceKeys = groupName === 'AC-drenaggi' ? ['AC-' + flag.dataset.text]
+      : groupName === 'U-via-enterale-sel' ? [ACCESSO_PIECE_BY_TEXT[flag.dataset.text]]
+      : pieceKeysForGroup(groupName);
     unfreezePieceKeys(pieceKeys);
     render();
     // Si ancora al ".group" più esterno (non al gruppo/sotto-pannello più vicino usato per
@@ -981,7 +1040,7 @@ document.querySelectorAll('.flag').forEach(flag => {
 });
 
 ['fio2-val','peep-val','sopra-peep-val','atti-val','modalita-val','o2-lmin-val','eta-val','flusso-val',
- 'temp-val','ristagno-qta-val','altro-sede-val',
+ 'temp-val','sng-ristagno-qta-val','gastro-ristagno-qta-val','nava-ristagno-qta-val','altro-sede-val',
  'tor-asp-val','tor-qta-val','add-asp-val','add-qta-val','cra-asp-val','cra-qta-val','alt-asp-val','alt-qta-val'].forEach(id => {
   const el = document.getElementById(id);
   if(el) el.addEventListener('input', () => {
@@ -1286,37 +1345,7 @@ function render(){
   }
 
   let uAlimArr = state['U-alimentazione'] || [];
-  // Un paziente può avere più accessi enterali insieme (es. SNG e gastrostomia), non sempre
-  // legati alla nutrizione: stato e ristagno restano campi unici condivisi tra gli accessi
-  // selezionati (non tracciati per singolo dispositivo, per non complicare troppo il form).
-  let uViaArr = state['U-via-enterale-sel'] || [];
-  const DEVICE_LABELS = { 'tramite SNG': 'SNG', 'tramite gastrostomia': 'gastrostomia', 'tramite sondino NAVA': 'sondino NAVA' };
-  const DEVICE_PREP = { 'tramite SNG': 'dal SNG', 'tramite gastrostomia': 'dalla gastrostomia', 'tramite sondino NAVA': 'dal sondino NAVA' };
-  const hasDeviceForRistagno = uViaArr.length > 0;
-  let uViaStato = hasDeviceForRistagno ? (state['U-via-stato-sel'] && state['U-via-stato-sel'][0]) : '';
-  // "chiuso/a" concorda con il genere del dispositivo: femminile solo se l'unico accesso
-  // selezionato è la gastrostomia (SNG e sondino NAVA sono maschili).
-  if(uViaStato === 'chiuso' && uViaArr.includes('tramite gastrostomia') && !uViaArr.some(v => v !== 'tramite gastrostomia')) uViaStato = 'chiusa';
-  const ristagnoTxt = hasDeviceForRistagno ? (state['U-ristagno-sel'] && state['U-ristagno-sel'][0]) : '';
-  const viaMentionedInAlim = uAlimArr.includes('in nutrizione enterale') && uViaArr.length > 0;
-  const deviceLabel = joinItalian(uViaArr.map(v => DEVICE_LABELS[v]));
-  const devicePrep = joinItalian(uViaArr.map(v => DEVICE_PREP[v]));
-
-  const ristagnoQta = document.getElementById('ristagno-qta-val').value;
-  const ristagnoQtySuffix = ristagnoQta ? ` (${ristagnoQta} ml)` : '';
-  const ACCESSO_KEYS = ['U-via-enterale-sel', 'U-via-stato-sel', 'U-ristagno-sel', 'ristagno-qta-val'];
-
   if(uAlimArr.length){
-    // possono essere selezionate più modalità di alimentazione insieme (es. digiuno +
-    // biberon); il dispositivo enterale (SNG/gastrostomia), se presente, si aggancia
-    // solo alla voce "in nutrizione enterale", ovunque si trovi tra quelle scelte.
-    let enteraleExtra = '';
-    if(viaMentionedInAlim){
-      const extraBits = [];
-      if(uViaStato) extraBits.push(uViaStato);
-      extraBits.push(ristagnoTxt ? ('presente ' + ristagnoTxt + ristagnoQtySuffix) : 'ben tollerata');
-      enteraleExtra = ` tramite ${deviceLabel}, ` + extraBits.join(', ');
-    }
     // biberon e al seno, se scelti insieme, si uniscono con "e" sotto un unico "si
     // alimenta" invece di ripetersi separati (es. "si alimenta tramite biberon e al seno").
     const NUTRIZIONE_KEYS = ['tramite biberon', 'al seno'];
@@ -1329,30 +1358,41 @@ function render(){
           displayArr.push('si alimenta ' + joinItalian(nutrizioneItems));
           nutrizioneInserted = true;
         }
-      } else if(a === 'in nutrizione enterale'){
-        displayArr.push(a + enteraleExtra);
       } else {
         displayArr.push(a);
       }
     });
     const alimTxt = displayArr.join(', ');
-    uParts.push({ pieceKey: 'U-alimentazione', text: mark(sourceMatches('U-alimentazione', ...ACCESSO_KEYS), alimTxt) });
+    uParts.push({ pieceKey: 'U-alimentazione', text: mark(sourceMatches('U-alimentazione'), alimTxt) });
   }
 
-  // stato (chiuso/a caduta) e ristagno quando l'accesso digestivo non è legato
-  // alla nutrizione enterale (es. a digiuno, per os, nessuna alimentazione selezionata)
-  if(uViaArr.length && !viaMentionedInAlim){
-    let accessoTxt;
-    if(uViaStato){
-      const ristagnoPart = ristagnoTxt ? ('presenta ' + ristagnoTxt + ristagnoQtySuffix) : '';
-      accessoTxt = [`${deviceLabel} ${uViaStato}`, ristagnoPart].filter(Boolean).join(', ');
-    } else if(ristagnoTxt){
-      accessoTxt = 'presenta ' + ristagnoTxt + ` ${devicePrep}` + ristagnoQtySuffix;
-    } else {
-      accessoTxt = `${deviceLabel} in sede`;
-    }
-    uParts.push({ pieceKey: 'U-accesso', text: mark(sourceMatches(...ACCESSO_KEYS), accessoTxt) });
+  // Ogni accesso enterale (SNG, gastrostomia, sondino NAVA) è tracciato in modo
+  // indipendente, come per i drenaggi: non sempre gli accessi presenti sono usati per
+  // la nutrizione (un paziente può averne più di uno), quindi ciascuno ha il proprio
+  // chip "Nutrizione", stato e ristagno, e genera una frase a sé.
+  const accessoConfig = {
+    'tramite SNG':          { pieceKey: 'U-sng',    label: 'SNG',          femminile: false, nutr: 'U-sng-nutrizione',    stato: 'U-sng-stato',    ristagno: 'U-sng-ristagno',    qtaId: 'sng-ristagno-qta-val' },
+    'tramite gastrostomia': { pieceKey: 'U-gastro',  label: 'gastrostomia', femminile: true,  nutr: 'U-gastro-nutrizione', stato: 'U-gastro-stato', ristagno: 'U-gastro-ristagno', qtaId: 'gastro-ristagno-qta-val' },
+    'tramite sondino NAVA': { pieceKey: 'U-nava',    label: 'sondino NAVA', femminile: false, nutr: 'U-nava-nutrizione',  stato: 'U-nava-stato',   ristagno: 'U-nava-ristagno',   qtaId: 'nava-ristagno-qta-val' }
+  };
+  function buildAccesso(pieceKey, label, femminile, nutrGroup, statoGroup, ristagnoGroup, qtaInputId){
+    const isNutrizione = (state[nutrGroup] || []).length > 0;
+    let statoTxt = state[statoGroup] && state[statoGroup][0];
+    if(statoTxt === 'chiuso' && femminile) statoTxt = 'chiusa';
+    const ristagnoTxt = state[ristagnoGroup] && state[ristagnoGroup][0];
+    const qtaVal = document.getElementById(qtaInputId) ? document.getElementById(qtaInputId).value : '';
+    const qtySuffix = qtaVal ? ` (${qtaVal} ml)` : '';
+    const bits = [];
+    if(isNutrizione) bits.push('utilizzat' + (femminile ? 'a' : 'o') + ' per la nutrizione enterale');
+    if(statoTxt) bits.push(statoTxt);
+    if(ristagnoTxt) bits.push('presenta ' + ristagnoTxt + qtySuffix);
+    const str = bits.length ? `${label} ${bits.join(', ')}` : `${label} in sede`;
+    return { pieceKey, text: mark(sourceMatches(nutrGroup, statoGroup, ristagnoGroup, qtaInputId), str) };
   }
+  (state['U-via-enterale-sel'] || []).forEach(v => {
+    const cfg = accessoConfig[v];
+    if(cfg) uParts.push(buildAccesso(cfg.pieceKey, cfg.label, cfg.femminile, cfg.nutr, cfg.stato, cfg.ristagno, cfg.qtaId));
+  });
 
   let uAlvo = state['U-alvo'] && state['U-alvo'][0];
   if(uAlvo){
