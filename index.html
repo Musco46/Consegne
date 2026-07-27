@@ -833,18 +833,33 @@ const sb = window.supabase.createClient(
 const state = {};
 
 // La consegna è divisa in 6 sezioni fisse (Neurologico, Ventilazione, Circolo, Diuresi,
-// Drenaggi, Attività), sempre nello stesso ordine. Dentro ogni sezione, le categorie che
-// non si influenzano a vicenda (es. in Ventilazione: supporto ventilatorio, saturazione,
-// secrezioni, scialorrea) sono a loro volta tracciate come "pezzi" indipendenti, così
-// modificarne uno a mano non tocca gli altri. Fa eccezione il Neurologico, dove stato di
-// coscienza/reattività/agitazione restano volutamente nella stessa frase.
-// Una modifica manuale che non si riesce ad attribuire in modo chiaro a un singolo pezzo
-// (es. cancellata una riga intera, o la modifica attraversa più pezzi) congela l'intera
-// sezione come blocco unico, sotto la chiave della sezione stessa.
+// Drenaggi, Attività), sempre nello stesso ordine, una riga ciascuna. Dentro ogni sezione,
+// le categorie che non si influenzano a vicenda (es. in Ventilazione: supporto
+// ventilatorio, saturazione, secrezioni, scialorrea) sono frasi indipendenti, tracciate
+// come "pezzi" separati: riscriverne uno a mano non tocca gli altri, e cliccare un chip
+// rigenera solo la sua categoria. Fa eccezione il Neurologico, dove stato di coscienza/
+// reattività/agitazione restano volutamente nella stessa frase.
 const SECTION_ORDER = ['neuro', 'vent', 'circolo', 'diuresi', 'drenaggi', 'attivita'];
-let manualSections = {};      // chiave sezione o pezzo -> testo congelato
-let lastRenderedPieces = [];  // [{key, text, subPieces}] righe attualmente mostrate, in ordine
-let extraTrailingText = '';   // eventuale testo extra scritto a mano oltre le righe note
+
+// Testo scritto a mano che ha preso il posto di una categoria. 'keys' elenca le categorie
+// che il segmento occupa: di norma una sola, più di una solo quando una modifica è stata
+// scritta a cavallo di due frasi. La voce è indicizzata sotto keys[0]; toccare un chip di
+// una QUALUNQUE delle sue chiavi la scioglie e fa tornare automatiche tutte le categorie
+// coinvolte.
+let manualPieces = {};   // keys[0] -> { keys: [...], text }
+
+// Note scritte a mano su una riga propria: non appartengono a nessuna categoria, quindi
+// nessun chip le tocca mai. Ancorate dopo una sezione ('_end' = dopo tutte, null = prima).
+let blockNotes = [];     // [{ after: sectionKey | '_end' | null, text }]
+
+// Righe attualmente mostrate, in ordine. Ogni riga porta la propria decomposizione in
+// segmenti e i separatori LETTERALI tra essi, con l'invariante
+//   segs[0].text + seps[0] + segs[1].text + seps[1] + ... === text
+// mantenuta a ogni battuta. I confini si ricavano da qui quando servono: tenerli come
+// offset memorizzati significava vederli invecchiare al primo carattere digitato (render()
+// di proposito non parte mentre si scrive) e attribuire le battute successive con
+// coordinate che puntavano a una stringa non più esistente.
+let lastRenderedLines = []; // [{ sectionKey, noteIndex, segs:[{keys,text,manual}], seps:[], text }]
 
 // Dato il gruppo di stato (o l'id di un campo) appena cliccato/compilato, restituisce le
 // chiavi dei "pezzi" da scongelare (tornano automatici). Più di una chiave quando lo stesso
@@ -888,28 +903,23 @@ function pieceKeysForGroup(name){
   return [];
 }
 
-// Data la chiave di un pezzo, la sezione fissa a cui appartiene: serve a scongelare anche
-// il blocco intero se la sezione era stata congelata tutta insieme (modifica ambigua, non
-// attribuibile a un singolo pezzo) — altrimenti scongelare solo il pezzo non avrebbe alcun
-// effetto visibile, dato che il blocco intero avrebbe comunque la precedenza.
-function sectionKeyForPieceKey(pieceKey){
-  if(pieceKey === 'neuro' || pieceKey.startsWith('neuro-')) return 'neuro';
-  if(pieceKey.startsWith('V-')) return 'vent';
-  if(pieceKey.startsWith('C-')) return 'circolo';
-  if(pieceKey.startsWith('U-')) return 'diuresi';
-  if(pieceKey.startsWith('AC-')) return 'drenaggi';
-  if(pieceKey.startsWith('T-')) return 'attivita';
-  return null;
+// Sotto quale chiave è indicizzato il segmento manuale che copre questa categoria: di norma
+// la categoria stessa, ma può essere un'altra se una modifica scritta a cavallo di più
+// frasi le ha inglobate in un unico segmento.
+function manualKeyCovering(pieceKey){
+  if(Object.prototype.hasOwnProperty.call(manualPieces, pieceKey)) return pieceKey;
+  return Object.keys(manualPieces).find(k => manualPieces[k].keys.includes(pieceKey)) || null;
 }
 
+// Le categorie appena toccate da un chip tornano automatiche. Se erano state inglobate in
+// un segmento scritto a cavallo, l'intero segmento si scioglie: tutte le categorie che
+// conteneva tornano automatiche insieme, altrimenti il testo di quelle non toccate
+// resterebbe duplicato tra il segmento e la propria frase rigenerata.
 function unfreezePieceKeys(pieceKeys){
-  const sections = new Set();
   pieceKeys.forEach(k => {
-    delete manualSections[k];
-    const s = sectionKeyForPieceKey(k);
-    if(s) sections.add(s);
+    const owner = manualKeyCovering(k);
+    if(owner) delete manualPieces[owner];
   });
-  sections.forEach(s => delete manualSections[s]);
 }
 
 // Niente barra AutoFill (contatti/password) sopra la tastiera. Il trucco è type="search":
@@ -1162,12 +1172,13 @@ function updateVentParamsVisibility(){
 }
 
 // Ordine fisso dei "pezzi" possibili all'interno di ciascuna sezione (anche quelli non
-// attivi in un dato momento): serve a finalizeSection per poter reinserire al posto giusto
+// attivi in un dato momento): serve a sectionSegments per poter reinserire al posto giusto
 // un pezzo congelato a mano il cui chip generatore, altrove nella stessa sezione, è stato
 // nel frattempo deselezionato (es. si scrive a mano l'Alimentazione, poi si toglie
 // l'accesso enterale: senza questo elenco il pezzo sparirebbe, perché non verrebbe più
 // generato affatto, non perché è stato svuotato di proposito).
 const PIECE_ORDER = {
+  neuro: ['neuro-open', 'neuro-stato'],
   vent: ['V-supporto', 'V-spo2', 'V-secrezioni', 'V-scialorrea'],
   circolo: ['C-stato', 'C-cute', 'C-temp'],
   diuresi: ['U-diuresi', 'U-alimentazione', 'U-sng', 'U-gastro', 'U-nava', 'U-ristagno', 'U-alvo'],
@@ -1175,45 +1186,80 @@ const PIECE_ORDER = {
   attivita: ['T-medicazione-dispositivi', 'T-esami', 'T-assistenza']
 };
 
-// Costruisce il testo finale di una sezione a partire dai suoi "pezzi" (categorie
-// indipendenti), rispettando eventuali congelamenti per singolo pezzo (usati com'è, senza
-// applicare concordanza di genere o maiuscole: è testo scritto a mano, va rispettato).
-// Un pezzo congelato a mano resta nell'output anche se, in questo render, il suo chip
-// generatore non produce più nulla (es. deselezionato altrove nella sezione): altrimenti
-// la modifica manuale sparirebbe senza che l'utente l'abbia toccata.
-// Restituisce anche i confini di ciascun pezzo sopravvissuto, in caratteri "puliti" (senza
-// marcatori), usati più tardi per capire quale pezzo è stato toccato se l'utente modifica
-// la riga a mano.
-function finalizeSection(pieces, joiner, perPiecePeriod, sesso, sectionKey){
+// Il testo scritto a mano viene ripulito dei separatori di bordo (spazi e punteggiatura che
+// possono essere finiti dentro il segmento mentre si scriveva a cavallo di un separatore):
+// sarà riunito agli altri con il separatore standard della sezione, non deve portarsi
+// dietro il proprio. Si fa QUI, a ogni render, mai mentre si scrive: durante la
+// digitazione i segmenti devono ricomporre la riga carattere per carattere.
+function normalizeManualText(t){
+  return t.replace(/^[\s.;,]+/, '').replace(/[\s.;,]+$/, '');
+}
+
+// Elenco ordinato dei segmenti di una sezione: le categorie generate dai chip, quelle
+// riscritte a mano al posto loro, e nient'altro (le note su riga propria vivono fuori).
+// Una categoria riscritta a mano resta nell'elenco anche se in questo render il suo chip
+// generatore non produce più nulla (es. deselezionato altrove nella sezione): altrimenti la
+// modifica manuale sparirebbe senza che l'utente l'abbia toccata. PIECE_ORDER dà la
+// posizione in cui reinserirla.
+function sectionSegments(pieces, joiner, perPiecePeriod, sesso, sectionKey){
   const byKey = {};
   pieces.forEach(p => { byKey[p.pieceKey] = p.text; });
-  const order = (sectionKey && PIECE_ORDER[sectionKey]) || [];
-  const keys = order.filter(k => Object.prototype.hasOwnProperty.call(byKey, k) || Object.prototype.hasOwnProperty.call(manualSections, k));
+  const order = PIECE_ORDER[sectionKey] || [];
+  const isPresent = k => Object.prototype.hasOwnProperty.call(byKey, k) || manualKeyCovering(k) !== null;
+  const keys = order.filter(isPresent);
   pieces.forEach(p => { if(!keys.includes(p.pieceKey)) keys.push(p.pieceKey); });
 
-  const rendered = [];
+  // Un segmento va in maiuscola solo se apre davvero una frase: il primo della riga, o
+  // quello che segue un separatore che chiude la frase precedente. Nel Neurologico i pezzi
+  // sono uniti da un semplice spazio dentro la stessa frase ("Bambino vigile..."), quindi
+  // il secondo prosegue in minuscolo.
+  const opensSentence = perPiecePeriod || /[.!?]\s*$/.test(joiner);
+
+  const segs = [];
+  const emitted = new Set();
   keys.forEach(pieceKey => {
-    let t;
-    if(Object.prototype.hasOwnProperty.call(manualSections, pieceKey)){
-      t = manualSections[pieceKey];
-    } else {
-      t = sesso === 'F' ? feminizeText(byKey[pieceKey]) : byKey[pieceKey];
-      t = capitalizeSentences(t);
+    const owner = manualKeyCovering(pieceKey);
+    if(owner){
+      // segmento scritto a mano: reso com'è, senza concordanza di genere né maiuscole
+      // automatiche. Se copre più categorie viene emesso una volta sola, alla prima.
+      if(emitted.has(owner)) return;
+      emitted.add(owner);
+      let t = normalizeManualText(manualPieces[owner].text);
+      // dove ogni frase chiude con il proprio punto (drenaggi, attività) il punto fa parte
+      // del separatore, quindi normalizeManualText l'ha tolto e va rimesso anche qui
       if(perPiecePeriod && t) t += '.';
+      if(t !== '') segs.push({ keys: manualPieces[owner].keys.slice(), text: t, manual: true });
+      return;
     }
-    if(t !== '') rendered.push({ pieceKey, text: t });
+    let t = sesso === 'F' ? feminizeText(byKey[pieceKey]) : byKey[pieceKey];
+    t = capitalizeSentences(t);
+    if(segs.length && !opensSentence) t = lowerFirstReal(t);
+    if(perPiecePeriod && t) t += '.';
+    if(t !== '') segs.push({ keys: [pieceKey], text: t, manual: false });
   });
-  if(!rendered.length) return null;
-  let cleanPos = 0;
-  const subPieces = [];
-  rendered.forEach(r => {
-    const cleanLen = r.text.split(MARK_START).join('').split(MARK_END).join('').length;
-    subPieces.push({ pieceKey: r.pieceKey, start: cleanPos, end: cleanPos + cleanLen });
-    cleanPos += cleanLen + joiner.length;
-  });
-  let text = rendered.map(r => r.text).join(joiner);
-  if(!perPiecePeriod) text += '.';
-  return { text, subPieces };
+  return segs;
+}
+
+// Unisce i segmenti in una riga con il separatore standard della sezione. Restituisce sia
+// il testo marcato (per l'evidenziazione) sia la decomposizione pulita, con i separatori
+// letterali: da lì in poi la riga resta sempre ricomponibile esattamente.
+// Il punto finale, dove previsto, viene attribuito all'ultimo segmento invece di restare
+// in terra di nessuno: così scrivere subito prima o dopo di esso estende quella categoria
+// anziché finire in un confine non attribuibile.
+function joinSegments(segs, joiner, finalPeriod){
+  if(!segs.length) return null;
+  const withPeriod = finalPeriod
+    ? segs.map((s, i) => i === segs.length - 1 ? { keys: s.keys, text: s.text + '.', manual: s.manual } : s)
+    : segs;
+  const seps = withPeriod.slice(0, -1).map(() => joiner);
+  const strip = t => t.split(MARK_START).join('').split(MARK_END).join('');
+  const build = pick => withPeriod.map(s => pick(s.text)).reduce((acc, t, i) => acc + (i ? seps[i - 1] : '') + t, '');
+  return {
+    marked: build(t => t),
+    text: build(strip),
+    segs: withPeriod.map(s => ({ keys: s.keys.slice(), text: strip(s.text), manual: s.manual })),
+    seps
+  };
 }
 
 function render(){
@@ -1508,70 +1554,57 @@ function render(){
   // Neurologico: l'età (se presente) e la frase su stato di coscienza/reattività/
   // agitazione sono due pezzi separati (l'età si può congelare/scongelare per conto suo),
   // ma quest'ultima non si divide ulteriormente, come deciso: restano nella stessa frase.
-  const neuroRendered = [];
-  if(Object.prototype.hasOwnProperty.call(manualSections, 'neuro-open')){
-    if(manualSections['neuro-open']) neuroRendered.push({ pieceKey: 'neuro-open', text: manualSections['neuro-open'] });
-  } else {
-    const openWord = ageOpeningWord(etaVal, sesso);
-    if(openWord) neuroRendered.push({ pieceKey: 'neuro-open', text: capitalizeSentences(mark(sourceMatches('eta-val'), openWord)) });
-  }
-  if(Object.prototype.hasOwnProperty.call(manualSections, 'neuro-stato')){
-    if(manualSections['neuro-stato']) neuroRendered.push({ pieceKey: 'neuro-stato', text: manualSections['neuro-stato'] });
-  } else if(nParts.length){
-    let t = sesso === 'F' ? feminizeText(joinPhrases(nParts, ', ')) : joinPhrases(nParts, ', ');
-    t = capitalizeSentences(t);
-    if(neuroRendered.length) t = lowerFirstReal(t); // segue l'apertura: "Paziente vigile...", non "Paziente Vigile..."
-    neuroRendered.push({ pieceKey: 'neuro-stato', text: t });
-  }
-  let neuroSection = null;
-  if(neuroRendered.length){
-    let cleanPos = 0;
-    const subPieces = [];
-    neuroRendered.forEach(r => {
-      const cleanLen = r.text.split(MARK_START).join('').split(MARK_END).join('').length;
-      subPieces.push({ pieceKey: r.pieceKey, start: cleanPos, end: cleanPos + cleanLen });
-      cleanPos += cleanLen + 1; // joiner: uno spazio singolo
-    });
-    neuroSection = { text: neuroRendered.map(r => r.text).join(' ') + '.', subPieces };
-  }
+  const nPieces = [];
+  const openWord = ageOpeningWord(etaVal, sesso);
+  if(openWord) nPieces.push({ pieceKey: 'neuro-open', text: mark(sourceMatches('eta-val'), openWord) });
+  if(nParts.length) nPieces.push({ pieceKey: 'neuro-stato', text: joinPhrases(nParts, ', ') });
 
-  const sectionResults = {
-    neuro: neuroSection,
-    vent: finalizeSection(vParts, '. ', false, sesso, 'vent'),
-    circolo: finalizeSection(cParts, '. ', false, sesso, 'circolo'),
-    diuresi: finalizeSection(uParts, '. ', false, sesso, 'diuresi'),
-    drenaggi: finalizeSection(acParts, ' ', true, sesso, 'drenaggi'),
-    attivita: finalizeSection(tParts, ' ', true, sesso, 'attivita')
+  const SECTION_LAYOUT = {
+    neuro:     { pieces: nPieces,  joiner: ' ',  perPiecePeriod: false },
+    vent:      { pieces: vParts,   joiner: '. ', perPiecePeriod: false },
+    circolo:   { pieces: cParts,   joiner: '. ', perPiecePeriod: false },
+    diuresi:   { pieces: uParts,   joiner: '. ', perPiecePeriod: false },
+    drenaggi:  { pieces: acParts,  joiner: ' ',  perPiecePeriod: true  },
+    attivita:  { pieces: tParts,   joiner: ' ',  perPiecePeriod: true  }
   };
-
-  // Assembla l'output rispettando l'ordine fisso delle sezioni: una sezione congelata come
-  // blocco unico resta quella (anche se lo stato che l'aveva generata è nel frattempo
-  // svuotato); altrimenti si usa la versione appena calcolata, che già rispetta i
-  // congelamenti dei singoli pezzi al suo interno.
-  const outputPieces = [];
+  const sectionResults = {};
   SECTION_ORDER.forEach(key => {
-    if(Object.prototype.hasOwnProperty.call(manualSections, key)){
-      if(manualSections[key]) outputPieces.push({ key, text: manualSections[key], subPieces: null });
-    } else if(sectionResults[key]){
-      outputPieces.push({ key, text: sectionResults[key].text, subPieces: sectionResults[key].subPieces });
-    }
+    const L = SECTION_LAYOUT[key];
+    const segs = sectionSegments(L.pieces, L.joiner, L.perPiecePeriod, sesso, key);
+    sectionResults[key] = joinSegments(segs, L.joiner, !L.perPiecePeriod);
   });
 
-  let markedFull = outputPieces.map(p => p.text).join('\n');
-  // Testo scritto a mano oltre l'ultima riga nota (o l'unico testo presente, se nessun
-  // chip è ancora stato selezionato da nessuna parte): senza questo, ogni render lo
-  // cancellava dalla textarea visibile pur continuando a tenerlo in memoria.
-  if(extraTrailingText) markedFull = markedFull ? markedFull + '\n' + extraTrailingText : extraTrailingText;
-  applyRenderedText(markedFull);
+  // Assembla l'output nell'ordine fisso delle sezioni, intercalando le note scritte a mano
+  // su riga propria nel punto in cui sono ancorate. Le note non appartengono a nessuna
+  // categoria: nessun chip le tocca e restano anche se la sezione a cui sono ancorate non
+  // produce più niente.
+  const outputLines = [];
+  const notesAfter = anchor => blockNotes.forEach(n => {
+    if(n.after === anchor && n.text !== '') outputLines.push({ sectionKey: null, note: n, marked: n.text, text: n.text, segs: null, seps: null });
+  });
+  notesAfter(null);
+  SECTION_ORDER.forEach(key => {
+    const r = sectionResults[key];
+    if(r) outputLines.push({ sectionKey: key, note: null, marked: r.marked, text: r.text, segs: r.segs, seps: r.seps });
+    notesAfter(key);
+  });
+  notesAfter('_end');
+  // Un'ancora può essere rimasta orfana (es. la sezione a cui la nota era agganciata non
+  // produce più nulla): la nota non va persa, finisce in fondo.
+  const shown = new Set(outputLines.map(l => l.note).filter(Boolean));
+  blockNotes.forEach(n => {
+    if(!shown.has(n) && n.text !== '') outputLines.push({ sectionKey: null, note: n, marked: n.text, text: n.text, segs: null, seps: null });
+  });
 
-  lastRenderedPieces = outputPieces.map(p => ({
-    key: p.key,
-    text: p.text.split(MARK_START).join('').split(MARK_END).join(''),
-    subPieces: p.subPieces || null
+  applyRenderedText(outputLines.map(l => l.marked).join('\n'));
+
+  lastRenderedLines = outputLines.map(l => ({
+    sectionKey: l.sectionKey,
+    note: l.note,
+    text: l.text,
+    segs: l.segs,
+    seps: l.seps
   }));
-  if(extraTrailingText){
-    extraTrailingText.split('\n').forEach(t => lastRenderedPieces.push({ key: '_extra', text: t, subPieces: null }));
-  }
 }
 
 // Estrae dal testo marcato l'intervallo esatto (se presente) corrispondente all'ultimo
@@ -1608,37 +1641,113 @@ function applyRenderedText(markedText){
   scrollAndHighlightRange(textarea, range.start, range.end);
 }
 
-// Congela una riga modificata a mano. Se la riga è divisa in più pezzi (categorie
-// indipendenti), trova con prefisso/suffisso comuni quale pezzo copre la modifica e congela
-// solo quello; se la modifica è ambigua (attraversa più pezzi, o tocca il punto finale)
-// congela l'intera riga come blocco unico, più sicuro. Restituisce la riga aggiornata.
-function freezeEditedLine(piece, newText){
-  if(newText !== piece.text){
-    if(piece.subPieces && piece.subPieces.length){
-      const oldText = piece.text;
-      let s = 0;
-      const maxS = Math.min(oldText.length, newText.length);
-      while(s < maxS && oldText[s] === newText[s]) s++;
-      let oldEnd = oldText.length, newEnd = newText.length;
-      while(oldEnd > s && newEnd > s && oldText[oldEnd - 1] === newText[newEnd - 1]){ oldEnd--; newEnd--; }
-      const covering = piece.subPieces.filter(sp => sp.start < oldEnd && sp.end > s);
-      if(covering.length === 1){
-        const sp = covering[0];
-        const suffixLen = oldText.length - sp.end;
-        const newPieceEnd = Math.max(sp.start, newText.length - suffixLen);
-        manualSections[sp.pieceKey] = newText.slice(sp.start, newPieceEnd);
-      } else {
-        // prima si scongelano i pezzi, poi si congela la riga intera: nell'ordine inverso,
-        // una chiave di pezzo uguale a quella della sezione cancellerebbe subito il testo
-        // appena salvato
-        piece.subPieces.forEach(sp => delete manualSections[sp.pieceKey]);
-        manualSections[piece.key] = newText;
-      }
-    } else if(SECTION_ORDER.includes(piece.key)){
-      manualSections[piece.key] = newText;
+// Registra un tratto scritto a mano al posto delle categorie indicate, togliendo prima le
+// voci che coprivano quelle stesse categorie (una modifica a cavallo ne fonde più di una).
+function setManualSegment(keys, text){
+  keys.forEach(k => { const owner = manualKeyCovering(k); if(owner) delete manualPieces[owner]; });
+  manualPieces[keys[0]] = { keys: keys.slice(), text };
+}
+
+// I confini dei segmenti si ricavano dai testi correnti ogni volta che servono. Tenerli
+// memorizzati come offset era la causa del bug storico: render() non parte mentre si
+// scrive, quindi dal primo carattere digitato puntavano a una stringa non più esistente e
+// le battute successive ritagliavano finestre della vecchia lunghezza dal punto sbagliato.
+function segmentBounds(segs, seps){
+  const bounds = [];
+  let pos = 0;
+  segs.forEach((sg, i) => {
+    bounds.push({ start: pos, end: pos + sg.text.length });
+    pos += sg.text.length + (seps[i] || '').length;
+  });
+  return bounds;
+}
+
+function lineFromSegments(segs, seps){
+  return segs.map((sg, i) => sg.text + (seps[i] || '')).join('');
+}
+
+// Ripartisce una riga di sezione dopo una modifica scritta a mano: individua il tratto
+// cambiato con prefisso/suffisso comuni e lo attribuisce ai segmenti che lo coprono. Ogni
+// ramo tocca SOLO i segmenti che ha individuato e ne ricalcola il testo a partire dal testo
+// di quel segmento: nessuno ritaglia la riga intera con confini globali.
+function repartitionLine(line, newText){
+  const oldText = line.text;
+  let s = 0;
+  const maxS = Math.min(oldText.length, newText.length);
+  while(s < maxS && oldText[s] === newText[s]) s++;
+  let oldEnd = oldText.length, newEnd = newText.length;
+  while(oldEnd > s && newEnd > s && oldText[oldEnd - 1] === newText[newEnd - 1]){ oldEnd--; newEnd--; }
+  const inserted = newText.slice(s, newEnd);
+
+  const segs = line.segs.map(sg => ({ keys: sg.keys.slice(), text: sg.text, manual: sg.manual }));
+  const seps = line.seps.slice();
+  const bounds = segmentBounds(segs, seps);
+  const covering = [];
+  bounds.forEach((b, i) => { if(b.start < oldEnd && b.end > s) covering.push(i); });
+
+  if(covering.length === 0){
+    // Scritto su un confine o dentro un separatore: si attacca al segmento adiacente. Prima
+    // qui si congelava l'intera riga, ed era il motivo per cui una nota faceva sparire tutte
+    // le altre categorie della sezione al primo click su un chip qualsiasi.
+    let k = -1;
+    for(let i = 0; i < seps.length; i++){
+      if(s >= bounds[i].end && oldEnd <= bounds[i + 1].start){ k = i; break; }
     }
+    if(k === -1){
+      // in testa alla riga o in coda all'ultimo segmento
+      const i = s >= bounds[bounds.length - 1].end ? segs.length - 1 : 0;
+      segs[i].text = (i === 0 && s === 0) ? inserted + segs[i].text : segs[i].text + inserted;
+      segs[i].manual = true;
+    } else {
+      const sep = seps[k];
+      const from = s - bounds[k].end, to = oldEnd - bounds[k].end;
+      if(from !== 0 && to === sep.length){
+        // attaccato all'inizio della frase successiva: sta cominciando quella
+        segs[k + 1].text = inserted + segs[k + 1].text;
+        segs[k + 1].manual = true;
+        seps[k] = sep.slice(0, from);
+      } else {
+        // attaccato alla fine della frase precedente: la sta completando
+        segs[k].text = segs[k].text + sep.slice(0, from) + inserted;
+        segs[k].manual = true;
+        seps[k] = sep.slice(to);
+      }
+    }
+  } else {
+    // Il tratto cambiato copre una o più categorie: diventano un unico segmento manuale, ma
+    // solo quelle toccate — le altre della riga restano indipendenti. Toccare poi un chip di
+    // una qualunque delle categorie coinvolte scioglie il segmento.
+    let first = covering[0], last = covering[covering.length - 1];
+    // Se la modifica ha mangiato anche il separatore accanto, la frase adiacente entra nella
+    // fusione: l'utente ha unito le due frasi, non ne ha modificata una sola. Il confronto è
+    // stretto, così riscrivere la prima parola di una frase non trascina dentro la frase
+    // precedente solo perché la modifica inizia sul suo confine.
+    while(first > 0 && s < bounds[first].start) first--;
+    while(last < segs.length - 1 && oldEnd > bounds[last].end) last++;
+    const mergedStart = Math.min(bounds[first].start, s);
+    const mergedOldEnd = Math.max(bounds[last].end, oldEnd);
+    const mergedText = newText.slice(mergedStart, newText.length - (oldText.length - mergedOldEnd));
+    const mergedKeys = [];
+    for(let i = first; i <= last; i++) segs[i].keys.forEach(k => { if(!mergedKeys.includes(k)) mergedKeys.push(k); });
+    if(first > 0) seps[first - 1] = seps[first - 1].slice(0, mergedStart - bounds[first - 1].end);
+    if(last < seps.length) seps[last] = seps[last].slice(mergedOldEnd - bounds[last].end);
+    segs.splice(first, last - first + 1, { keys: mergedKeys, text: mergedText, manual: true });
+    seps.splice(first, last - first);
   }
-  return { key: piece.key, text: newText, subPieces: piece.subPieces || null };
+
+  // Rete di sicurezza: se i segmenti non ricompongono esattamente il testo digitato si
+  // ripiega su un unico segmento manuale per l'intera riga, invece di rischiare di perdere
+  // o duplicare testo in silenzio.
+  const allKeys = [];
+  line.segs.forEach(sg => sg.keys.forEach(k => { if(!allKeys.includes(k)) allKeys.push(k); }));
+  if(lineFromSegments(segs, seps) !== newText){
+    setManualSegment(allKeys, newText);
+    return { sectionKey: line.sectionKey, note: null, text: newText,
+             segs: [{ keys: allKeys, text: newText, manual: true }], seps: [] };
+  }
+
+  segs.forEach(sg => { if(sg.manual) setManualSegment(sg.keys, sg.text); });
+  return { sectionKey: line.sectionKey, note: null, text: newText, segs, seps };
 }
 
 // Quando l'utente scrive a mano nella consegna, capiamo QUALE riga ha toccato confrontando
@@ -1646,42 +1755,53 @@ function freezeEditedLine(piece, newText){
 document.getElementById('output').addEventListener('input', () => {
   const textarea = document.getElementById('output');
   const currentLines = textarea.value.split('\n');
-  const knownCount = lastRenderedPieces.length;
+  const known = lastRenderedLines;
 
   // Le righe si allineano per prefisso/suffisso comuni, non per posizione: cancellando (o
   // aggiungendo) una riga in mezzo, tutte le successive risulterebbero "modificate" e ogni
   // sezione verrebbe congelata con il testo di quella dopo, mentre l'ultima tornerebbe
   // automatica e comparirebbe due volte al render successivo.
   let pre = 0;
-  while(pre < currentLines.length && pre < knownCount && currentLines[pre] === lastRenderedPieces[pre].text) pre++;
-  let curEnd = currentLines.length, knownEnd = knownCount;
-  while(curEnd > pre && knownEnd > pre && currentLines[curEnd - 1] === lastRenderedPieces[knownEnd - 1].text){ curEnd--; knownEnd--; }
+  while(pre < currentLines.length && pre < known.length && currentLines[pre] === known[pre].text) pre++;
+  let curEnd = currentLines.length, knownEnd = known.length;
+  while(curEnd > pre && knownEnd > pre && currentLines[curEnd - 1] === known[knownEnd - 1].text){ curEnd--; knownEnd--; }
 
-  const rebuilt = lastRenderedPieces.slice(0, pre);
+  const rebuilt = known.slice(0, pre);
   if(knownEnd - pre === curEnd - pre){
     // Stesso numero di righe nella zona modificata: ognuna resta attribuibile alla propria
     // sezione, anche quando ne cambiano più di una insieme (es. incolla).
-    for(let i = pre; i < knownEnd; i++) rebuilt.push(freezeEditedLine(lastRenderedPieces[i], currentLines[i]));
-  } else {
-    // Righe intere aggiunte o rimosse: la corrispondenza riga/sezione è saltata e la
-    // modifica non è più attribuibile, quindi le sezioni coinvolte tornano automatiche.
     for(let i = pre; i < knownEnd; i++){
-      const piece = lastRenderedPieces[i];
-      delete manualSections[piece.key];
-      if(piece.subPieces) piece.subPieces.forEach(sp => delete manualSections[sp.pieceKey]);
+      const line = known[i], newText = currentLines[i];
+      if(newText === line.text) rebuilt.push(line);
+      else if(line.note) rebuilt.push({ sectionKey: null, note: { after: line.note.after, text: newText }, text: newText, segs: null, seps: null });
+      else rebuilt.push(repartitionLine(line, newText));
     }
-    for(let i = pre; i < curEnd; i++) rebuilt.push({ key: '_extra', text: currentLines[i], subPieces: null });
+  } else {
+    // Righe intere aggiunte o rimosse: la corrispondenza riga/sezione è saltata. Le sezioni
+    // coinvolte tornano automatiche e il testo rimasto diventa una nota su riga propria, che
+    // da lì in poi vive per conto suo e non viene più toccata da nessun chip.
+    for(let i = pre; i < knownEnd; i++){
+      const line = known[i];
+      if(!line.note) line.segs.forEach(sg => unfreezePieceKeys(sg.keys));
+    }
+    for(let i = pre; i < curEnd; i++){
+      rebuilt.push({ sectionKey: null, note: { after: null, text: currentLines[i] }, text: currentLines[i], segs: null, seps: null });
+    }
   }
-  for(let i = knownEnd; i < knownCount; i++) rebuilt.push(lastRenderedPieces[i]);
-  lastRenderedPieces = rebuilt;
+  for(let i = knownEnd; i < known.length; i++) rebuilt.push(known[i]);
+  lastRenderedLines = rebuilt;
 
-  // Tutto ciò che sta dopo l'ultima riga di sezione è testo scritto a mano: non ha pezzi né
-  // sezione da congelare, quindi va risalvato per intero a ogni modifica. Ricalcolarlo solo
-  // quando cambia il NUMERO di righe faceva perdere le correzioni successive a una riga già
-  // scritta a mano: al render seguente tornava la versione precedente.
-  let extraStart = 0;
-  lastRenderedPieces.forEach((p, i) => { if(SECTION_ORDER.includes(p.key)) extraStart = i + 1; });
-  extraTrailingText = currentLines.slice(extraStart).join('\n');
+  // Ogni nota resta agganciata alla sezione che la precede, così a ogni render torna al suo
+  // posto invece di poter solo finire in fondo. '_end' per quelle che stanno dopo tutte le
+  // sezioni, null per quelle che le precedono tutte.
+  let lastSectionIdx = -1;
+  lastRenderedLines.forEach((l, i) => { if(l.sectionKey) lastSectionIdx = i; });
+  let seen = null;
+  lastRenderedLines.forEach((l, i) => {
+    if(l.sectionKey){ seen = l.sectionKey; return; }
+    if(l.note) l.note.after = i > lastSectionIdx ? '_end' : seen;
+  });
+  blockNotes = lastRenderedLines.filter(l => l.note).map(l => l.note);
 
   clearOutputHighlight();
 });
@@ -1870,9 +1990,9 @@ function resetAll(){
   document.querySelectorAll('.params-box').forEach(p => p.classList.remove('show'));
   document.querySelectorAll('input[type=number], input[type=text], input[type=search]').forEach(i => i.value = '');
   for(const k in state) state[k] = [];
-  manualSections = {};
-  lastRenderedPieces = [];
-  extraTrailingText = '';
+  manualPieces = {};
+  blockNotes = [];
+  lastRenderedLines = [];
   highlightSource = null;
   highlightPiece = null;
   render();
@@ -1898,10 +2018,10 @@ async function saveConsegna(){
   const sesso = (state['sesso'] && state['sesso'][0]) || '';
   const { error } = await sb.from('consegne_turno').insert({
     letto, testo, eta, sesso,
-    // "groups" sono i flag selezionati; manualSections/extraTrailingText sono le sezioni
-    // modificate a mano, che altrimenti andrebbero perse ricaricando la consegna (senza
-    // di loro il caricamento rigenera tutto da zero dai soli flag, ignorando le modifiche).
-    stato: JSON.parse(JSON.stringify({ groups: state, manualSections, extraTrailingText })),
+    // "groups" sono i flag selezionati; manualPieces/blockNotes sono le categorie riscritte
+    // a mano e le note su riga propria, che altrimenti andrebbero perse ricaricando la
+    // consegna (senza di loro il caricamento rigenera tutto da zero dai soli flag).
+    stato: JSON.parse(JSON.stringify({ groups: state, manualPieces, blockNotes })),
     inputs: collectInputs()
   });
   if(!error){
@@ -1990,6 +2110,31 @@ async function loadSavedList(){
   }).join('');
 }
 
+// Converte nel modello a segmenti lo stato manuale delle consegne salvate in precedenza.
+// 'manualSections' indicizzava sia le singole categorie sia le righe congelate in blocco
+// sotto la chiave della sezione: queste ultime diventano un segmento che copre tutte le
+// categorie di quella sezione, così toccare un chip qualsiasi lo scioglie come allora.
+function migrateOldManualState(stato){
+  const old = stato.manualSections;
+  if(old){
+    Object.keys(old).forEach(k => {
+      // 'neuro' indicava la sola frase su coscienza/reattività/agitazione, non la sezione
+      if(k === 'neuro'){
+        if(!Object.prototype.hasOwnProperty.call(old, 'neuro-stato')) setManualSegment(['neuro-stato'], old[k]);
+        return;
+      }
+      if(!SECTION_ORDER.includes(k)) setManualSegment([k], old[k]);
+    });
+    SECTION_ORDER.forEach(sec => {
+      if(sec === 'neuro' || !Object.prototype.hasOwnProperty.call(old, sec)) return;
+      setManualSegment(PIECE_ORDER[sec].slice(), old[sec]);
+    });
+  }
+  if(stato.extraTrailingText){
+    stato.extraTrailingText.split('\n').forEach(t => blockNotes.push({ after: '_end', text: t }));
+  }
+}
+
 async function loadConsegna(id){
   const { data: item, error } = await sb.from('consegne_turno').select('*').eq('id', id).single();
   if(error || !item){
@@ -1998,25 +2143,17 @@ async function loadConsegna(id){
   }
   highlightSource = null;
   highlightPiece = null;
-  manualSections = {};
-  lastRenderedPieces = [];
-  extraTrailingText = '';
+  manualPieces = {};
+  blockNotes = [];
+  lastRenderedLines = [];
   if(item.stato && Object.keys(item.stato).length){
-    // formato nuovo: { groups, manualSections, extraTrailingText }. Formato vecchio
-    // (consegne salvate prima di questa modifica): item.stato è direttamente i "groups",
-    // senza sezioni congelate salvate (si comporta come prima, tutto automatico).
+    // formato nuovo: { groups, manualPieces, blockNotes }. Formato più vecchio: item.stato
+    // è direttamente i "groups", oppure porta manualSections/extraTrailingText.
     const savedGroups = item.stato.groups || item.stato;
     applyState(savedGroups, item.inputs);
-    manualSections = item.stato.manualSections ? JSON.parse(JSON.stringify(item.stato.manualSections)) : {};
-    // Consegne salvate prima che la sezione Neurologico e la sola frase su coscienza/
-    // reattività/agitazione avessero chiavi distinte: lì 'neuro' era sempre il pezzo (il
-    // ramo che congelava l'intera riga non era raggiungibile per questa sezione).
-    if(Object.prototype.hasOwnProperty.call(manualSections, 'neuro')
-       && !Object.prototype.hasOwnProperty.call(manualSections, 'neuro-stato')){
-      manualSections['neuro-stato'] = manualSections['neuro'];
-      delete manualSections['neuro'];
-    }
-    extraTrailingText = item.stato.extraTrailingText || '';
+    if(item.stato.manualPieces) manualPieces = JSON.parse(JSON.stringify(item.stato.manualPieces));
+    if(item.stato.blockNotes) blockNotes = JSON.parse(JSON.stringify(item.stato.blockNotes));
+    migrateOldManualState(item.stato);
     render();
   } else {
     // Formato più vecchio ancora: solo il testo. Il form va comunque azzerato, altrimenti
@@ -2025,8 +2162,8 @@ async function loadConsegna(id){
     applyState(item.sesso ? { sesso: [item.sesso] } : null, item.inputs);
     const testo = item.testo || '';
     document.getElementById('output').value = testo;
-    extraTrailingText = testo;
-    lastRenderedPieces = testo ? testo.split('\n').map(t => ({ key: '_extra', text: t, subPieces: null })) : [];
+    blockNotes = testo ? testo.split('\n').map(t => ({ after: '_end', text: t })) : [];
+    lastRenderedLines = blockNotes.map(n => ({ sectionKey: null, note: n, text: n.text, segs: null, seps: null }));
   }
   document.getElementById('letto-val').value = item.letto || '';
   document.getElementById('eta-val').value = item.eta || '';
