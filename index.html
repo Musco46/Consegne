@@ -179,6 +179,7 @@
     flex-shrink:0;
   }
   .output-header h2{margin:0;font-size:.95rem;}
+  .header-actions{display:flex;gap:8px;flex-shrink:0;}
   .toggle-btn{
     border:none;
     background:#EEF1F3;
@@ -195,6 +196,35 @@
   }
   .output-wrap.collapsed .output-body{display:none;}
   .output-wrap.collapsed .toggle-btn::after{content:'';}
+
+  /* Modalità estesa (solo mobile): il riquadro copre tutto lo schermo, per rileggere o
+     ricopiare a mano la consegna senza doverla far scorrere in una finestrella alta pochi
+     centimetri. Su desktop la colonna è già a tutta altezza, quindi non serve. */
+  .output-wrap.expanded{
+    position:fixed;
+    inset:0;
+    width:100%;
+    max-width:none;
+    max-height:none;
+    margin:0;
+    border-radius:0;
+    z-index:100;
+  }
+  .output-wrap.expanded .output-header{cursor:default;}
+  .output-wrap.expanded #toggle-btn{display:none;}
+  .output-wrap.expanded .output-body{
+    display:flex;
+    flex-direction:column;
+    flex:1;
+    min-height:0;
+  }
+  .output-wrap.expanded .textarea-stack{
+    flex:1;
+    min-height:0;
+    max-height:none;
+  }
+  .output-wrap.expanded .actions{flex-shrink:0;}
+  .output-wrap.expanded textarea{overscroll-behavior:contain;}
   .textarea-stack{
     position:relative;
     width:100%;
@@ -337,6 +367,19 @@
     .output-wrap.collapsed .output-body{display:flex !important;flex-direction:column;}
     .output-header{cursor:default;}
     .toggle-btn{display:none;}
+    /* la modalità estesa non deve restare attaccata passando da mobile a desktop
+       (allargando la finestra): qui il riquadro torna comunque la colonna di sempre */
+    .output-wrap.expanded{
+      position:sticky;
+      inset:auto;
+      top:20px;
+      width:auto;
+      height:calc(100vh - 40px);
+      max-height:calc(100vh - 40px);
+      margin:20px 0 0;
+      border-radius:12px;
+      z-index:20;
+    }
     .output-body{
       flex:1;
       display:flex;
@@ -798,7 +841,10 @@
 <div class="output-wrap" id="output-wrap">
   <div class="output-header" onclick="toggleOutput()">
     <h2>Consegne RIA</h2>
-    <button class="toggle-btn" id="toggle-btn" type="button">Nascondi ▼</button>
+    <div class="header-actions">
+      <button class="toggle-btn" id="expand-btn" type="button" onclick="toggleExpand(event)">Estendi</button>
+      <button class="toggle-btn" id="toggle-btn" type="button">Nascondi ▼</button>
+    </div>
   </div>
   <div class="output-body" id="output-body">
     <div class="textarea-stack">
@@ -1892,12 +1938,36 @@ function copyOutput(){
 
 function toggleOutput(){
   const wrap = document.getElementById('output-wrap');
+  // a schermo intero il riquadro è già tutto visibile: il tocco sull'intestazione non deve
+  // richiuderlo (il tasto Nascondi lì è nascosto proprio per questo)
+  if(wrap.classList.contains('expanded')) return;
   const btn = document.getElementById('toggle-btn');
   wrap.classList.toggle('collapsed');
   const isCollapsed = wrap.classList.contains('collapsed');
   btn.textContent = isCollapsed ? 'Mostra ▲' : 'Nascondi ▼';
   if(!isCollapsed) rebuildHighlightRects();
 }
+
+// Riquadro a schermo intero, per rileggere o ricopiare a mano la consegna sul telefono senza
+// scorrerla in una finestrella alta pochi centimetri. Estendere implica mostrare: si esce
+// dallo stato chiuso, altrimenti "Estendi" da chiuso aprirebbe un pannello vuoto.
+function toggleExpand(e){
+  // il tasto sta dentro l'intestazione, che al click chiude il riquadro: qui il click
+  // finisce qui e basta
+  if(e) e.stopPropagation();
+  const wrap = document.getElementById('output-wrap');
+  wrap.classList.remove('collapsed');
+  outputAutoCollapsed = false;
+  const isExpanded = wrap.classList.toggle('expanded');
+  document.getElementById('expand-btn').textContent = isExpanded ? 'Riduci' : 'Estendi';
+  document.getElementById('toggle-btn').textContent = 'Nascondi ▼';
+  rebuildHighlightRects();
+}
+
+// Con una tastiera fisica (tablet con cover, desktop) Esc è il modo naturale per uscire.
+document.addEventListener('keydown', e => {
+  if(e.key === 'Escape' && document.getElementById('output-wrap').classList.contains('expanded')) toggleExpand();
+});
 
 // Su mobile, quando si apre la tastiera per compilare un campo, richiudi il riquadro
 // della consegna generata così restano visibili i flag e il campo che si sta compilando.
@@ -1907,6 +1977,8 @@ let outputAutoCollapsed = false;
 document.querySelectorAll('input, select').forEach(el => {
   el.addEventListener('focus', () => {
     const wrap = document.getElementById('output-wrap');
+    // a schermo intero il form è coperto dal riquadro: non c'è spazio da liberare
+    if(wrap.classList.contains('expanded')) return;
     if(!wrap.classList.contains('collapsed')) outputAutoCollapsed = true;
     wrap.classList.add('collapsed');
     const btn = document.getElementById('toggle-btn');
@@ -1916,7 +1988,7 @@ document.querySelectorAll('input, select').forEach(el => {
     setTimeout(() => {
       const active = document.activeElement;
       const stillEditing = active && (active.tagName === 'INPUT' || active.tagName === 'SELECT');
-      if(!stillEditing && outputAutoCollapsed){
+      if(!stillEditing && outputAutoCollapsed && !document.getElementById('output-wrap').classList.contains('expanded')){
         const wrap = document.getElementById('output-wrap');
         wrap.classList.remove('collapsed');
         const btn = document.getElementById('toggle-btn');
