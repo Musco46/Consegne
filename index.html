@@ -430,10 +430,10 @@
     <div class="group" data-group="V-supporto" data-mode="radio">
       <div class="group-label">Supporto ventilatorio</div>
       <div class="flags">
-        <span class="flag" data-text="respiro spontaneo, in aria ambiente" data-toggle="vent-params" data-toggle-show="false">Respiro spontaneo</span>
-        <span class="flag" data-text="in ossigenoterapia tramite occhialini nasali" data-toggle="occ-params" data-toggle-show="true">ON</span>
-        <span class="flag" data-text="in supporto ventilatorio non invasivo (NIV)" data-toggle="vent-params" data-toggle-show="true" data-sub="V-niv-device">NIV</span>
-        <span class="flag" data-text="in ventilazione meccanica invasiva" data-toggle="vent-params" data-toggle-show="true" data-sub="V-invasiva-via">Ventilazione invasiva</span>
+        <span class="flag" data-text="respiro spontaneo, in aria ambiente">Respiro spontaneo</span>
+        <span class="flag" data-text="in ossigenoterapia tramite occhialini nasali">ON</span>
+        <span class="flag" data-text="in supporto ventilatorio non invasivo (NIV)" data-sub="V-niv-device">NIV</span>
+        <span class="flag" data-text="in ventilazione meccanica invasiva" data-sub="V-invasiva-via">Ventilazione invasiva</span>
       </div>
       <div class="sub-flags" id="V-niv-device" data-group="V-niv-device-sel" data-mode="radio">
         <div class="sub-label">Tipo di supporto NIV</div>
@@ -853,7 +853,10 @@ let extraTrailingText = '';   // eventuale testo extra scritto a mano oltre le r
 function pieceKeysForGroup(name){
   if(!name) return [];
   if(name === 'eta-val') return ['neuro-open'];
-  if(name.startsWith('N-')) return ['neuro'];
+  // 'neuro-stato' è il pezzo (la frase su coscienza/reattività/agitazione), 'neuro' è la
+  // sezione intera: due chiavi distinte, altrimenti congelare il pezzo verrebbe letto come
+  // congelamento dell'intera riga e l'apertura con l'età sparirebbe.
+  if(name.startsWith('N-')) return ['neuro-stato'];
   if(name === 'V-spo2') return ['V-spo2'];
   if(name === 'V-secrezioni' || name === 'V-aspetto-sel') return ['V-secrezioni'];
   if(name === 'V-scialorrea') return ['V-scialorrea'];
@@ -890,7 +893,7 @@ function pieceKeysForGroup(name){
 // attribuibile a un singolo pezzo) — altrimenti scongelare solo il pezzo non avrebbe alcun
 // effetto visibile, dato che il blocco intero avrebbe comunque la precedenza.
 function sectionKeyForPieceKey(pieceKey){
-  if(pieceKey === 'neuro' || pieceKey === 'neuro-open') return 'neuro';
+  if(pieceKey === 'neuro' || pieceKey.startsWith('neuro-')) return 'neuro';
   if(pieceKey.startsWith('V-')) return 'vent';
   if(pieceKey.startsWith('C-')) return 'circolo';
   if(pieceKey.startsWith('U-')) return 'diuresi';
@@ -994,16 +997,6 @@ document.querySelectorAll('.flag').forEach(flag => {
       });
     }
 
-    // params-box toggle (ventilazione)
-    if(flag.dataset.toggle){
-      const target = document.getElementById(flag.dataset.toggle);
-      if(flag.classList.contains('on') && flag.dataset.toggleShow === 'true'){
-        target.classList.add('show');
-      } else if(flag.classList.contains('on') && flag.dataset.toggleShow === 'false'){
-        target.classList.remove('show');
-      }
-    }
-
     // occhialini nasali have their own O2 L/min field; other supports show only the
     // parameters relevant to that specific device (NIV device or invasiva)
     if(groupName === 'V-supporto' || groupName === 'V-niv-device-sel'){
@@ -1016,10 +1009,11 @@ document.querySelectorAll('.flag').forEach(flag => {
     // cliccato (es. "toracico", "tramite SNG") per scongelare solo quello, senza toccare gli
     // altri elementi dello stesso gruppo.
     const ACCESSO_PIECE_BY_TEXT = { 'tramite SNG': 'U-sng', 'tramite gastrostomia': 'U-gastro', 'tramite sondino NAVA': 'U-nava' };
+    highlightPiece = groupName === 'AC-drenaggi' ? 'AC-' + flag.dataset.text : null;
     const pieceKeys = groupName === 'AC-drenaggi' ? ['AC-' + flag.dataset.text]
       : groupName === 'U-via-enterale-sel' ? ['U-alimentazione', ACCESSO_PIECE_BY_TEXT[flag.dataset.text]]
       : pieceKeysForGroup(groupName);
-    unfreezePieceKeys(pieceKeys);
+    unfreezePieceKeys(pieceKeys.filter(Boolean));
     render();
     // Si ancora al ".group" più esterno (non al gruppo/sotto-pannello più vicino usato per
     // la logica di stato): categorie come Emodinamica o Diuresi hanno più contenitori
@@ -1036,6 +1030,7 @@ document.querySelectorAll('.flag').forEach(flag => {
   const el = document.getElementById(id);
   if(el) el.addEventListener('input', () => {
     highlightSource = id;
+    highlightPiece = null;
     unfreezePieceKeys(pieceKeysForGroup(id));
     render();
   });
@@ -1101,21 +1096,22 @@ function feminizeText(text){
 const MARK_START = '\u0001';
 const MARK_END = '\u0002';
 let highlightSource = null; // nome del gruppo di stato o id del campo appena modificato
+// Quando il gruppo da solo non basta a sapere QUALE pezzo è stato toccato (es. "AC-drenaggi"
+// vale per tutti i drenaggi presenti, che sono pezzi distinti), qui c'è la chiave del pezzo
+// da evidenziare: senza, ogni drenaggio riceverebbe la sua coppia di marcatori e finirebbe
+// evidenziato il primo dell'elenco invece di quello appena selezionato.
+let highlightPiece = null;
 
 function sourceMatches(...keys){
   return highlightSource != null && keys.includes(highlightSource);
 }
 
-function mark(matches, text){
-  return (matches && text) ? MARK_START + text + MARK_END : text;
+function pieceMatches(pieceKey){
+  return highlightPiece === null || highlightPiece === pieceKey;
 }
 
-function capitalize(s){
-  if(!s) return s;
-  let i = 0;
-  while(i < s.length && (s[i] === MARK_START || s[i] === MARK_END)) i++;
-  if(i >= s.length) return s;
-  return s.slice(0, i) + s.charAt(i).toUpperCase() + s.slice(i + 1);
+function mark(matches, text){
+  return (matches && text) ? MARK_START + text + MARK_END : text;
 }
 
 function lowerFirstReal(s){
@@ -1284,7 +1280,9 @@ function render(){
       } else if(extraTxt){
         supTxt = 'ventilato' + (modeVal ? ` in ${modeVal}` : '') + ' ' + extraTxt;
       } else {
-        supTxt = vSupporto;
+        // Ventilazione invasiva senza via aerea ancora scelta: il campo Modalità è già
+        // visibile e compilabile, quindi va comunque riportato invece di essere scartato.
+        supTxt = vSupporto + (modeVal ? `, modalità ${modeVal}` : '');
       }
       vParts.push({ pieceKey: 'V-supporto', text: mark(sourceMatches(...V_SUPPORTO_KEYS), supTxt + (paramBits.length ? ` (${paramBits.join(', ')})` : '')) });
     } else {
@@ -1335,9 +1333,7 @@ function render(){
   if(state['C-cute'] && state['C-cute'][0]) cParts.push({ pieceKey: 'C-cute', text: mark(sourceMatches('C-cute'), state['C-cute'][0]) });
   let cTemp = state['C-temp'] && state['C-temp'][0];
   const tempVal = document.getElementById('temp-val').value;
-  if(cTemp === 'apiretico'){
-    cParts.push({ pieceKey: 'C-temp', text: mark(sourceMatches('C-temp', 'temp-val'), 'apiretico') });
-  } else if(cTemp){
+  if(cTemp){
     cParts.push({ pieceKey: 'C-temp', text: mark(sourceMatches('C-temp', 'temp-val'), tempVal ? `${cTemp}, TC ${tempVal}°C` : cTemp) });
   } else if(tempVal){
     cParts.push({ pieceKey: 'C-temp', text: mark(sourceMatches('C-temp', 'temp-val'), `TC ${tempVal}°C`) });
@@ -1470,7 +1466,9 @@ function render(){
     } else if(materialeTxt){
       str += `, drenato ${materialeTxt}`;
     }
-    return { pieceKey, text: mark(sourceMatches('AC-drenaggi', aspGroup, drenGroup, aspInputId, qtaInputId, ...(extraKeys || [])), str) };
+    const isSource = sourceMatches('AC-drenaggi', aspGroup, drenGroup, aspInputId, qtaInputId, ...(extraKeys || []))
+      && pieceMatches(pieceKey);
+    return { pieceKey, text: mark(isSource, str) };
   }
 
   (state['AC-drenaggi'] || []).forEach(d => {
@@ -1517,13 +1515,13 @@ function render(){
     const openWord = ageOpeningWord(etaVal, sesso);
     if(openWord) neuroRendered.push({ pieceKey: 'neuro-open', text: capitalizeSentences(mark(sourceMatches('eta-val'), openWord)) });
   }
-  if(Object.prototype.hasOwnProperty.call(manualSections, 'neuro')){
-    if(manualSections['neuro']) neuroRendered.push({ pieceKey: 'neuro', text: manualSections['neuro'] });
+  if(Object.prototype.hasOwnProperty.call(manualSections, 'neuro-stato')){
+    if(manualSections['neuro-stato']) neuroRendered.push({ pieceKey: 'neuro-stato', text: manualSections['neuro-stato'] });
   } else if(nParts.length){
     let t = sesso === 'F' ? feminizeText(joinPhrases(nParts, ', ')) : joinPhrases(nParts, ', ');
     t = capitalizeSentences(t);
     if(neuroRendered.length) t = lowerFirstReal(t); // segue l'apertura: "Paziente vigile...", non "Paziente Vigile..."
-    neuroRendered.push({ pieceKey: 'neuro', text: t });
+    neuroRendered.push({ pieceKey: 'neuro-stato', text: t });
   }
   let neuroSection = null;
   if(neuroRendered.length){
@@ -1572,7 +1570,7 @@ function render(){
     subPieces: p.subPieces || null
   }));
   if(extraTrailingText){
-    extraTrailingText.split('\n').forEach((t, i) => lastRenderedPieces.push({ key: '_extra' + i, text: t, subPieces: null }));
+    extraTrailingText.split('\n').forEach(t => lastRenderedPieces.push({ key: '_extra', text: t, subPieces: null }));
   }
 }
 
@@ -1610,19 +1608,12 @@ function applyRenderedText(markedText){
   scrollAndHighlightRange(textarea, range.start, range.end);
 }
 
-// Quando l'utente scrive a mano nella consegna, capiamo QUALE riga ha toccato confrontando
-// posizione per posizione con l'ultimo testo mostrato. Se quella riga è divisa in più pezzi
-// (categorie indipendenti), troviamo con prefisso/suffisso comuni quale pezzo copre la
-// modifica e congeliamo solo quello; se la modifica è ambigua (attraversa più pezzi, o
-// tocca il punto finale) congeliamo l'intera riga come blocco unico, più sicuro.
-document.getElementById('output').addEventListener('input', () => {
-  const textarea = document.getElementById('output');
-  const currentLines = textarea.value.split('\n');
-  const knownCount = lastRenderedPieces.length;
-  for(let i = 0; i < Math.min(knownCount, currentLines.length); i++){
-    const piece = lastRenderedPieces[i];
-    const newText = currentLines[i];
-    if(newText === piece.text) continue;
+// Congela una riga modificata a mano. Se la riga è divisa in più pezzi (categorie
+// indipendenti), trova con prefisso/suffisso comuni quale pezzo copre la modifica e congela
+// solo quello; se la modifica è ambigua (attraversa più pezzi, o tocca il punto finale)
+// congela l'intera riga come blocco unico, più sicuro. Restituisce la riga aggiornata.
+function freezeEditedLine(piece, newText){
+  if(newText !== piece.text){
     if(piece.subPieces && piece.subPieces.length){
       const oldText = piece.text;
       let s = 0;
@@ -1637,26 +1628,61 @@ document.getElementById('output').addEventListener('input', () => {
         const newPieceEnd = Math.max(sp.start, newText.length - suffixLen);
         manualSections[sp.pieceKey] = newText.slice(sp.start, newPieceEnd);
       } else {
-        manualSections[piece.key] = newText;
+        // prima si scongelano i pezzi, poi si congela la riga intera: nell'ordine inverso,
+        // una chiave di pezzo uguale a quella della sezione cancellerebbe subito il testo
+        // appena salvato
         piece.subPieces.forEach(sp => delete manualSections[sp.pieceKey]);
+        manualSections[piece.key] = newText;
       }
     } else if(SECTION_ORDER.includes(piece.key)){
       manualSections[piece.key] = newText;
     }
-    lastRenderedPieces[i] = { key: piece.key, text: newText, subPieces: piece.subPieces };
   }
-  if(currentLines.length > knownCount){
-    extraTrailingText = currentLines.slice(knownCount).join('\n');
-  } else if(currentLines.length < knownCount){
-    // righe intere cancellate dalla fine: quelle sezioni (e i loro pezzi) tornano automatiche
-    for(let i = currentLines.length; i < knownCount; i++){
+  return { key: piece.key, text: newText, subPieces: piece.subPieces || null };
+}
+
+// Quando l'utente scrive a mano nella consegna, capiamo QUALE riga ha toccato confrontando
+// il testo con l'ultimo mostrato.
+document.getElementById('output').addEventListener('input', () => {
+  const textarea = document.getElementById('output');
+  const currentLines = textarea.value.split('\n');
+  const knownCount = lastRenderedPieces.length;
+
+  // Le righe si allineano per prefisso/suffisso comuni, non per posizione: cancellando (o
+  // aggiungendo) una riga in mezzo, tutte le successive risulterebbero "modificate" e ogni
+  // sezione verrebbe congelata con il testo di quella dopo, mentre l'ultima tornerebbe
+  // automatica e comparirebbe due volte al render successivo.
+  let pre = 0;
+  while(pre < currentLines.length && pre < knownCount && currentLines[pre] === lastRenderedPieces[pre].text) pre++;
+  let curEnd = currentLines.length, knownEnd = knownCount;
+  while(curEnd > pre && knownEnd > pre && currentLines[curEnd - 1] === lastRenderedPieces[knownEnd - 1].text){ curEnd--; knownEnd--; }
+
+  const rebuilt = lastRenderedPieces.slice(0, pre);
+  if(knownEnd - pre === curEnd - pre){
+    // Stesso numero di righe nella zona modificata: ognuna resta attribuibile alla propria
+    // sezione, anche quando ne cambiano più di una insieme (es. incolla).
+    for(let i = pre; i < knownEnd; i++) rebuilt.push(freezeEditedLine(lastRenderedPieces[i], currentLines[i]));
+  } else {
+    // Righe intere aggiunte o rimosse: la corrispondenza riga/sezione è saltata e la
+    // modifica non è più attribuibile, quindi le sezioni coinvolte tornano automatiche.
+    for(let i = pre; i < knownEnd; i++){
       const piece = lastRenderedPieces[i];
       delete manualSections[piece.key];
       if(piece.subPieces) piece.subPieces.forEach(sp => delete manualSections[sp.pieceKey]);
     }
-    lastRenderedPieces = lastRenderedPieces.slice(0, currentLines.length);
-    extraTrailingText = '';
+    for(let i = pre; i < curEnd; i++) rebuilt.push({ key: '_extra', text: currentLines[i], subPieces: null });
   }
+  for(let i = knownEnd; i < knownCount; i++) rebuilt.push(lastRenderedPieces[i]);
+  lastRenderedPieces = rebuilt;
+
+  // Tutto ciò che sta dopo l'ultima riga di sezione è testo scritto a mano: non ha pezzi né
+  // sezione da congelare, quindi va risalvato per intero a ogni modifica. Ricalcolarlo solo
+  // quando cambia il NUMERO di righe faceva perdere le correzioni successive a una riga già
+  // scritta a mano: al render seguente tornava la versione precedente.
+  let extraStart = 0;
+  lastRenderedPieces.forEach((p, i) => { if(SECTION_ORDER.includes(p.key)) extraStart = i + 1; });
+  extraTrailingText = currentLines.slice(extraStart).join('\n');
+
   clearOutputHighlight();
 });
 
@@ -1831,21 +1857,11 @@ window.addEventListener('resize', () => rebuildHighlightRects());
 // provocherebbe un piccolo spostamento continuo cliccando chip diversi nella stessa riga.
 const FLAG_SCROLL_OFFSET = 120;
 function scrollFlagToFixedPosition(categoryEl){
-  const mainEl = document.querySelector('main');
-  const isContainerScroll = getComputedStyle(mainEl).overflowY === 'auto' || getComputedStyle(mainEl).overflowY === 'scroll';
-  const rect = categoryEl.getBoundingClientRect();
   // Scroll istantaneo, non "smooth": con l'animazione, click ravvicinati su chip della
   // stessa categoria (frequente, es. Emodinamica o Diuresi) misuravano la posizione a
   // animazione ancora in corso, quindi non ancora assestata, causando uno scorrimento
   // verso il basso che si accumulava a ogni click invece di stabilizzarsi.
-  if(isContainerScroll){
-    const mainRect = mainEl.getBoundingClientRect();
-    const delta = (rect.top - mainRect.top) - FLAG_SCROLL_OFFSET;
-    mainEl.scrollTop += delta;
-  } else {
-    const delta = rect.top - FLAG_SCROLL_OFFSET;
-    window.scrollBy(0, delta);
-  }
+  window.scrollBy(0, categoryEl.getBoundingClientRect().top - FLAG_SCROLL_OFFSET);
 }
 
 function resetAll(){
@@ -1858,6 +1874,7 @@ function resetAll(){
   lastRenderedPieces = [];
   extraTrailingText = '';
   highlightSource = null;
+  highlightPiece = null;
   render();
   clearOutputHighlight();
 }
@@ -1979,9 +1996,8 @@ async function loadConsegna(id){
     console.error('Errore nel caricamento:', error);
     return;
   }
-  document.getElementById('letto-val').value = item.letto || '';
-  document.getElementById('eta-val').value = item.eta || '';
   highlightSource = null;
+  highlightPiece = null;
   manualSections = {};
   lastRenderedPieces = [];
   extraTrailingText = '';
@@ -1992,19 +2008,34 @@ async function loadConsegna(id){
     const savedGroups = item.stato.groups || item.stato;
     applyState(savedGroups, item.inputs);
     manualSections = item.stato.manualSections ? JSON.parse(JSON.stringify(item.stato.manualSections)) : {};
+    // Consegne salvate prima che la sezione Neurologico e la sola frase su coscienza/
+    // reattività/agitazione avessero chiavi distinte: lì 'neuro' era sempre il pezzo (il
+    // ramo che congelava l'intera riga non era raggiungibile per questa sezione).
+    if(Object.prototype.hasOwnProperty.call(manualSections, 'neuro')
+       && !Object.prototype.hasOwnProperty.call(manualSections, 'neuro-stato')){
+      manualSections['neuro-stato'] = manualSections['neuro'];
+      delete manualSections['neuro'];
+    }
     extraTrailingText = item.stato.extraTrailingText || '';
     render();
   } else {
+    // Formato più vecchio ancora: solo il testo. Il form va comunque azzerato, altrimenti
+    // restano selezionati i chip della consegna caricata prima e il primo click su un chip
+    // qualsiasi rigenera il testo da uno stato che non c'entra nulla con questa consegna.
+    applyState(item.sesso ? { sesso: [item.sesso] } : null, item.inputs);
     const testo = item.testo || '';
     document.getElementById('output').value = testo;
     extraTrailingText = testo;
-    lastRenderedPieces = testo.split('\n').map((t, i) => ({ key: '_extra' + i, text: t }));
+    lastRenderedPieces = testo ? testo.split('\n').map(t => ({ key: '_extra', text: t, subPieces: null })) : [];
   }
+  document.getElementById('letto-val').value = item.letto || '';
+  document.getElementById('eta-val').value = item.eta || '';
   clearOutputHighlight();
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
 async function deleteConsegna(id){
+  if(!confirm('Eliminare definitivamente questa consegna salvata?')) return;
   const { error } = await sb.from('consegne_turno').delete().eq('id', id);
   if(error) console.error(error);
   loadSavedList();
