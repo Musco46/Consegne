@@ -801,13 +801,69 @@
   <section class="card s6" id="sec-6">
     <h2><span class="badge">6</span>Attività di turno</h2>
 
-    <div class="group" data-group="T-medicazione-dispositivi" data-mode="checkbox">
-      <div class="group-label">Medicazione presidi</div>
+    <div class="group" data-group="T-presidi" data-mode="checkbox">
+      <div class="group-label">Presidi</div>
       <div class="flags">
-        <span class="flag" data-text="CVC">CVC</span>
-        <span class="flag" data-text="linea arteriosa">Arteria</span>
-        <span class="flag" data-text="tracheostomia">Tracheostomia</span>
-        <span class="flag" data-text="gastrostomia">Gastrostomia</span>
+        <span class="flag" data-text="CVC" data-sub="T-pres-cvc">CVC</span>
+        <span class="flag" data-text="CVP" data-sub="T-pres-cvp">CVP</span>
+        <span class="flag" data-text="linea arteriosa" data-sub="T-pres-arteria">Arteria</span>
+        <span class="flag" data-text="tracheostomia" data-sub="T-pres-tracheo">Tracheo</span>
+        <span class="flag" data-text="gastrostomia" data-sub="T-pres-gastro">Gastrostomia</span>
+      </div>
+
+      <div class="sub-flags dren-detail" id="T-pres-cvc">
+        <div class="sub-label">CVC</div>
+        <div class="mini-group" data-group="T-cvc-stato" data-mode="radio">
+          <div class="sub-flags-inner">
+          <span class="flag" data-text="medicato">Medicato</span>
+          <span class="flag" data-text="posizionato">Posizionato</span>
+          <span class="flag" data-text="rimosso">Rimosso</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="sub-flags dren-detail" id="T-pres-cvp">
+        <div class="sub-label">CVP</div>
+        <div class="mini-group" data-group="T-cvp-stato" data-mode="radio">
+          <div class="sub-flags-inner">
+          <span class="flag" data-text="medicato">Medicato</span>
+          <span class="flag" data-text="posizionato">Posizionato</span>
+          <span class="flag" data-text="rimosso">Rimosso</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="sub-flags dren-detail" id="T-pres-arteria">
+        <div class="sub-label">Arteria</div>
+        <div class="mini-group" data-group="T-arteria-stato" data-mode="radio">
+          <div class="sub-flags-inner">
+          <span class="flag" data-text="medicato">Medicata</span>
+          <span class="flag" data-text="posizionato">Posizionata</span>
+          <span class="flag" data-text="rimosso">Rimossa</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="sub-flags dren-detail" id="T-pres-tracheo">
+        <div class="sub-label">Tracheostomia</div>
+        <div class="mini-group" data-group="T-tracheo-stato" data-mode="radio">
+          <div class="sub-flags-inner">
+          <span class="flag" data-text="medicato">Medicata</span>
+          <span class="flag" data-text="posizionato">Posizionata</span>
+          <span class="flag" data-text="rimosso">Rimossa</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="sub-flags dren-detail" id="T-pres-gastro">
+        <div class="sub-label">Gastrostomia</div>
+        <div class="mini-group" data-group="T-gastro-stato" data-mode="radio">
+          <div class="sub-flags-inner">
+          <span class="flag" data-text="medicato">Medicata</span>
+          <span class="flag" data-text="posizionato">Posizionata</span>
+          <span class="flag" data-text="rimosso">Rimossa</span>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -816,6 +872,7 @@
       <div class="flags">
         <span class="flag" data-text="eseguiti prelievi ematici">Prelievi ematici</span>
         <span class="flag" data-text="eseguita emogasanalisi di controllo">Emogasanalisi di controllo</span>
+        <span class="flag" data-text="eseguite emocolture">Emocolture</span>
         <span class="flag" data-text="fibroscopia">Fibroscopia</span>
         <span class="flag" data-text="RX">RX</span>
         <span class="flag" data-text="TAC">TAC</span>
@@ -952,7 +1009,9 @@ function pieceKeysForGroup(name){
   if(['AC-cra-aspirazione','AC-cra-drenato','cra-asp-val','cra-qta-val'].includes(name)) return ['AC-cranico'];
   if(['AC-alt-aspirazione','AC-alt-drenato','alt-asp-val','alt-qta-val','altro-sede-val'].includes(name)) return ['AC-altro'];
   if(name === 'AC-drenaggi') return ['AC-toracico','AC-addominale','AC-cranico','AC-altro'];
-  if(name === 'T-medicazione-dispositivi') return ['T-medicazione-dispositivi'];
+  // 'T-presidi' (quale presidio è in elenco) non basta a sapere QUALE frase scongelare: il
+  // click handler usa il testo del flag appena cliccato, come per drenaggi e accessi enterali.
+  if(PRESIDIO_PIECE_BY_STATO[name]) return [PRESIDIO_PIECE_BY_STATO[name]];
   if(name === 'T-esami') return ['T-esami'];
   if(name === 'T-assistenza') return ['T-assistenza'];
   return [];
@@ -1116,9 +1175,11 @@ document.querySelectorAll('.flag').forEach(flag => {
     const ACCESSO_PIECE_BY_TEXT = { 'tramite SNG': 'U-sng', 'tramite gastrostomia': 'U-gastro', 'tramite sondino NAVA': 'U-nava' };
     highlightPiece = groupName === 'AC-drenaggi' ? 'AC-' + flag.dataset.text
       : groupName === 'U-via-enterale-sel' ? (ACCESSO_PIECE_BY_TEXT[flag.dataset.text] || null)
+      : groupName === 'T-presidi' ? (PRESIDIO_PIECE_BY_TEXT[flag.dataset.text] || null)
       : null;
     const pieceKeys = groupName === 'AC-drenaggi' ? ['AC-' + flag.dataset.text]
       : groupName === 'U-via-enterale-sel' ? ['U-alimentazione', ACCESSO_PIECE_BY_TEXT[flag.dataset.text]]
+      : groupName === 'T-presidi' ? [PRESIDIO_PIECE_BY_TEXT[flag.dataset.text]]
       : pieceKeysForGroup(groupName);
     unfreezePieceKeys(pieceKeys.concat(extraPieceKeys).filter(Boolean));
     render();
@@ -1268,6 +1329,23 @@ function updateVentParamsVisibility(){
   });
 }
 
+// I presidi della sezione Attività: ognuno ha la propria frase (pieceKey) e il proprio stato
+// (medicato / posizionato / rimosso). 'femminile' serve alla concordanza dello stato, che
+// dipende dal presidio e non dal sesso del paziente.
+const PRESIDIO_CONFIG = {
+  'CVC':             { pieceKey: 'T-pres-cvc',     label: 'CVC',             femminile: false, stato: 'T-cvc-stato' },
+  'CVP':             { pieceKey: 'T-pres-cvp',     label: 'CVP',             femminile: false, stato: 'T-cvp-stato' },
+  'linea arteriosa': { pieceKey: 'T-pres-arteria', label: 'linea arteriosa', femminile: true,  stato: 'T-arteria-stato' },
+  'tracheostomia':   { pieceKey: 'T-pres-tracheo', label: 'tracheostomia',   femminile: true,  stato: 'T-tracheo-stato' },
+  'gastrostomia':    { pieceKey: 'T-pres-gastro',  label: 'gastrostomia',    femminile: true,  stato: 'T-gastro-stato' }
+};
+const PRESIDIO_PIECE_BY_TEXT = {};
+const PRESIDIO_PIECE_BY_STATO = {};
+Object.keys(PRESIDIO_CONFIG).forEach(k => {
+  PRESIDIO_PIECE_BY_TEXT[k] = PRESIDIO_CONFIG[k].pieceKey;
+  PRESIDIO_PIECE_BY_STATO[PRESIDIO_CONFIG[k].stato] = PRESIDIO_CONFIG[k].pieceKey;
+});
+
 // Ordine fisso dei "pezzi" possibili all'interno di ciascuna sezione (anche quelli non
 // attivi in un dato momento): serve a sectionSegments per poter reinserire al posto giusto
 // un pezzo congelato a mano il cui chip generatore, altrove nella stessa sezione, è stato
@@ -1280,7 +1358,11 @@ const PIECE_ORDER = {
   circolo: ['C-stato', 'C-cute', 'C-temp'],
   diuresi: ['U-diuresi', 'U-alimentazione', 'U-sng', 'U-gastro', 'U-nava', 'U-ristagno', 'U-alvo'],
   drenaggi: ['AC-toracico', 'AC-addominale', 'AC-cranico', 'AC-altro'],
-  attivita: ['T-medicazione-dispositivi', 'T-esami', 'T-assistenza']
+  // 'T-medicazione-dispositivi' era la vecchia categoria unica dei presidi: resta qui solo
+  // perché una consegna salvata allora può averla riscritta a mano, e quel testo va ancora
+  // mostrato al posto giusto (i chip di oggi generano invece un pezzo per presidio).
+  attivita: ['T-medicazione-dispositivi', 'T-pres-cvc', 'T-pres-cvp', 'T-pres-arteria',
+    'T-pres-tracheo', 'T-pres-gastro', 'T-esami', 'T-assistenza']
 };
 
 // Il testo scritto a mano viene ripulito dei separatori di bordo (spazi e punteggiatura che
@@ -1646,10 +1728,20 @@ function render(){
 
   // 6 - Attività di turno
   let tParts = [];
-  let medDispArr = state['T-medicazione-dispositivi'] || [];
-  if(medDispArr.length){
-    tParts.push({ pieceKey: 'T-medicazione-dispositivi', text: mark(sourceMatches('T-medicazione-dispositivi'), 'eseguita medicazione di ' + joinPhrases(medDispArr)) });
-  }
+  // Ogni presidio è una frase a sé, con il proprio stato (medicato / posizionato / rimosso),
+  // così due presidi con azioni diverse non finiscono nella stessa frase. Senza stato scelto
+  // vale "medicato", che era il significato dell'unica voce che esisteva prima di questa
+  // categoria ("Medicazione presidi").
+  (state['T-presidi'] || []).forEach(v => {
+    const cfg = PRESIDIO_CONFIG[v];
+    if(!cfg) return;
+    let statoTxt = (state[cfg.stato] && state[cfg.stato][0]) || 'medicato';
+    // la concordanza qui dipende dal presidio (la linea arteriosa è "rimossa" anche in un
+    // paziente maschio), non dal sesso del paziente come in feminizeText
+    if(cfg.femminile) statoTxt = statoTxt.replace(/o$/, 'a');
+    const isSource = sourceMatches(cfg.stato) || (sourceMatches('T-presidi') && pieceMatches(cfg.pieceKey));
+    tParts.push({ pieceKey: cfg.pieceKey, text: mark(isSource, `${cfg.label} ${statoTxt}`) });
+  });
 
   if(state['T-esami'] && state['T-esami'].length){
     const strumentali = new Set(['fibroscopia', 'RX', 'TAC', 'risonanza magnetica', 'EEG']);
@@ -2253,6 +2345,13 @@ function applyState(savedState, savedInputs){
       const v = savedState[k];
       state[k] = Array.isArray(v) ? v.slice() : (v == null || v === '' ? [] : [v]);
     }
+    // I presidi erano un'unica categoria "Medicazione presidi", senza stato per presidio:
+    // le consegne salvate allora diventano l'elenco di oggi, tutti "medicato", che è quello
+    // che quella categoria voleva dire.
+    if(state['T-medicazione-dispositivi'] && state['T-medicazione-dispositivi'].length && !(state['T-presidi'] || []).length){
+      state['T-presidi'] = state['T-medicazione-dispositivi'].filter(v => PRESIDIO_CONFIG[v]);
+      state['T-presidi'].forEach(v => { state[PRESIDIO_CONFIG[v].stato] = ['medicato']; });
+    }
   }
   // restore text inputs
   if(savedInputs){
@@ -2344,6 +2443,16 @@ function migrateOldManualState(stato){
   }
   if(stato.extraTrailingText){
     stato.extraTrailingText.split('\n').forEach(t => blockNotes.push({ after: '_end', text: t }));
+  }
+  // Un testo scritto a mano al posto della vecchia categoria unica dei presidi copre ora
+  // anche le frasi dei singoli presidi migrati: senza questo comparirebbe due volte, una
+  // come testo manuale e una come frase rigenerata dai chip.
+  const presidiOwner = manualKeyCovering('T-medicazione-dispositivi');
+  if(presidiOwner){
+    (state['T-presidi'] || []).forEach(v => {
+      const pk = PRESIDIO_CONFIG[v] && PRESIDIO_CONFIG[v].pieceKey;
+      if(pk && !manualPieces[presidiOwner].keys.includes(pk)) manualPieces[presidiOwner].keys.push(pk);
+    });
   }
 }
 
