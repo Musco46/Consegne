@@ -523,6 +523,7 @@
         <span class="flag" data-text="biancastre">Biancastre</span>
         <span class="flag" data-text="giallastre">Giallastre</span>
         <span class="flag" data-text="dense">Dense</span>
+        <span class="flag" data-text="semidense">Semidense</span>
         <span class="flag" data-text="fluide">Fluide</span>
         <span class="flag" data-text="semifluide">Semifluide</span>
         <span class="flag" data-text="ematiche">Ematiche</span>
@@ -601,7 +602,6 @@
         <div class="sub-label">Aspetto urine</div>
         <div class="sub-flags-inner">
         <span class="flag" data-text="urine chiare">Chiare</span>
-        <span class="flag" data-text="urine concentrate">Concentrate</span>
         <span class="flag" data-text="urine ipercromiche">Ipercromiche</span>
         <span class="flag" data-text="urine ematiche">Ematiche</span>
         <span class="flag" data-text="urine torbide">Torbide</span>
@@ -1447,7 +1447,7 @@ function render(){
     secrBits.push(vSecr);
     let vAspettoArr = state['V-aspetto-sel'] || [];
     if(vAspettoArr.length){
-      const viscosita = ['dense', 'fluide', 'semifluide', 'schiumose'];
+      const viscosita = ['dense', 'semidense', 'fluide', 'semifluide', 'schiumose'];
       const ordered = vAspettoArr.slice().sort((a, b) => {
         const ai = viscosita.includes(a) ? 0 : 1;
         const bi = viscosita.includes(b) ? 0 : 1;
