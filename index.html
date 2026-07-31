@@ -1728,13 +1728,14 @@ function render(){
   // 6 - Attività di turno
   let tParts = [];
   // Ogni presidio è una frase a sé, con il proprio stato (medicato / posizionato / rimosso),
-  // così due presidi con azioni diverse non finiscono nella stessa frase. Senza stato scelto
-  // vale "medicato", che era il significato dell'unica voce che esisteva prima di questa
-  // categoria ("Medicazione presidi").
+  // così due presidi con azioni diverse non finiscono nella stessa frase. Il presidio da solo
+  // non scrive niente: qui si raccontano le attività del turno, e la sola presenza di un
+  // presidio non è un'attività (è la sottocategoria a dire che cosa ci è stato fatto).
   (state['T-presidi'] || []).forEach(v => {
     const cfg = PRESIDIO_CONFIG[v];
     if(!cfg) return;
-    let statoTxt = (state[cfg.stato] && state[cfg.stato][0]) || 'medicato';
+    let statoTxt = state[cfg.stato] && state[cfg.stato][0];
+    if(!statoTxt) return;
     // la concordanza qui dipende dal presidio (la linea arteriosa è "rimossa" anche in un
     // paziente maschio), non dal sesso del paziente come in feminizeText
     if(cfg.femminile) statoTxt = statoTxt.replace(/o$/, 'a');
