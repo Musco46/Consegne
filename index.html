@@ -941,7 +941,10 @@ function pieceKeysForGroup(name){
   // accesso scongelare: il click handler usa il testo del flag appena cliccato (es.
   // "tramite SNG") per scongelare solo quel dispositivo, senza toccare gli altri due né
   // il Ristagno, che è una categoria a sé e non dipende da quale specifico accesso c'è.
-  if(name === 'U-ristagno-sel' || name === 'ristagno-qta-val') return ['U-ristagno'];
+  // Il Ristagno decide però anche se la nutrizione enterale è "ben tollerata", quindi
+  // scongela pure l'Alimentazione: altrimenti resterebbe scritto "ben tollerata" accanto
+  // a un ristagno appena indicato.
+  if(name === 'U-ristagno-sel' || name === 'ristagno-qta-val') return ['U-ristagno', 'U-alimentazione'];
   if(name === 'U-alimentazione') return ['U-alimentazione'];
   if(['U-diuresi','U-lasix','U-urine','U-quantita'].includes(name)) return ['U-diuresi'];
   if(['AC-tor-aspirazione','AC-tor-drenato','tor-asp-val','tor-qta-val'].includes(name)) return ['AC-toracico'];
@@ -1487,10 +1490,17 @@ function render(){
   let uUrine = state['U-urine'] && state['U-urine'][0];
   let uQuantita = state['U-quantita'] && state['U-quantita'][0];
   if(uDiuresi){
+    // La quantità qualifica la diuresi stessa e prende il posto di "valida" ("diuresi
+    // abbondante nel catetere vescicale"), invece di essere appesa in coda alla frase
+    // ("diuresi valida nel catetere vescicale, abbondante").
     let diuresiTxt = uDiuresi;
+    if(uQuantita){
+      diuresiTxt = diuresiTxt.includes('valida')
+        ? diuresiTxt.replace('valida', uQuantita)
+        : diuresiTxt + ', ' + uQuantita;
+    }
     if(state['U-lasix'] && state['U-lasix'].length) diuresiTxt += ', stimolata da Lasix';
-    let urineBits = [uQuantita, uUrine].filter(Boolean);
-    if(urineBits.length) diuresiTxt += ', ' + urineBits.join(', ');
+    if(uUrine) diuresiTxt += ', ' + uUrine;
     uParts.push({ pieceKey: 'U-diuresi', text: mark(sourceMatches('U-diuresi', 'U-lasix', 'U-urine', 'U-quantita'), diuresiTxt) });
   } else if(state['U-lasix'] && state['U-lasix'].length){
     uParts.push({ pieceKey: 'U-diuresi', text: mark(sourceMatches('U-lasix'), 'in terapia con Lasix') });
@@ -1526,7 +1536,11 @@ function render(){
     let nutrizioneInserted = false;
     const displayArr = [];
     if(nutrizioneDevices.length){
-      displayArr.push('in nutrizione enterale tramite ' + joinItalian(nutrizioneDevices.map(d => d.label)));
+      // Se non è stato indicato un ristagno, la nutrizione si dà per ben tollerata; quando
+      // invece c'è, lo dice già la frase del Ristagno poco più sotto.
+      const ristagnoScelto = !!(state['U-ristagno-sel'] && state['U-ristagno-sel'][0]);
+      displayArr.push('in nutrizione enterale tramite ' + joinItalian(nutrizioneDevices.map(d => d.label))
+        + (ristagnoScelto ? '' : ', ben tollerata'));
     }
     uAlimArr.forEach(a => {
       if(NUTRIZIONE_KEYS.includes(a)){
@@ -2177,15 +2191,26 @@ async function saveConsegna(){
     inputs: collectInputs()
   };
   // Se la consegna è stata aperta dall'elenco, "Salva" la aggiorna: prima ogni salvataggio
-  // creava una riga nuova, quindi aggiornare una consegna a fine turno la duplicava. Se però
-  // il letto è cambiato si tratta di un altro paziente (tipico: si riapre una consegna per
-  // usarla come base), quindi si crea una riga nuova invece di sovrascrivere quella vecchia.
+  // creava una riga nuova, quindi aggiornare una consegna a fine turno la duplicava.
   let res = null;
   if(currentConsegnaId && letto === currentConsegnaLetto){
     res = await sb.from('consegne_turno').update(payload).eq('id', currentConsegnaId).select('id');
     // La riga può essere sparita nel frattempo (cancellata da un altro dispositivo): l'update
     // non tocca nulla e non dà errore, quindi il salvataggio finirebbe nel vuoto. Si ricrea.
     if(!res.error && !(res.data && res.data.length)) res = null;
+  }
+  // Un letto = un paziente: se esiste già una consegna per quel letto (tipico: si riapre una
+  // consegna vecchia per usarla come base, o si ricompila da zero il letto di cui si è già
+  // scritto prima) la si sovrascrive invece di affiancarle una seconda riga per lo stesso
+  // letto. Fra eventuali doppioni già presenti in archivio si aggiorna il più recente.
+  if(!res){
+    const esistente = await sb.from('consegne_turno')
+      .select('id').eq('letto', letto).order('creato_il', { ascending: false }).limit(1);
+    const riga = !esistente.error && esistente.data && esistente.data[0];
+    if(riga){
+      res = await sb.from('consegne_turno').update(payload).eq('id', riga.id).select('id');
+      if(!res.error && !(res.data && res.data.length)) res = null;
+    }
   }
   if(!res) res = await sb.from('consegne_turno').insert(payload).select('id');
   const { data, error } = res;
