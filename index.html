@@ -812,7 +812,7 @@
 
       <div class="sub-flags dren-detail" id="T-pres-cvc">
         <div class="sub-label">CVC</div>
-        <div class="mini-group" data-group="T-cvc-stato" data-mode="radio">
+        <div class="mini-group" data-group="T-cvc-stato" data-mode="checkbox">
           <div class="sub-flags-inner">
           <span class="flag" data-text="medicato">Medicato</span>
           <span class="flag" data-text="posizionato">Posizionato</span>
@@ -824,7 +824,7 @@
 
       <div class="sub-flags dren-detail" id="T-pres-cvp">
         <div class="sub-label">CVP</div>
-        <div class="mini-group" data-group="T-cvp-stato" data-mode="radio">
+        <div class="mini-group" data-group="T-cvp-stato" data-mode="checkbox">
           <div class="sub-flags-inner">
           <span class="flag" data-text="medicato">Medicato</span>
           <span class="flag" data-text="posizionato">Posizionato</span>
@@ -836,7 +836,7 @@
 
       <div class="sub-flags dren-detail" id="T-pres-arteria">
         <div class="sub-label">Arteria</div>
-        <div class="mini-group" data-group="T-arteria-stato" data-mode="radio">
+        <div class="mini-group" data-group="T-arteria-stato" data-mode="checkbox">
           <div class="sub-flags-inner">
           <span class="flag" data-text="medicato">Medicata</span>
           <span class="flag" data-text="posizionato">Posizionata</span>
@@ -848,7 +848,7 @@
 
       <div class="sub-flags dren-detail" id="T-pres-tracheo">
         <div class="sub-label">Tracheostomia</div>
-        <div class="mini-group" data-group="T-tracheo-stato" data-mode="radio">
+        <div class="mini-group" data-group="T-tracheo-stato" data-mode="checkbox">
           <div class="sub-flags-inner">
           <span class="flag" data-text="medicato">Medicata</span>
           <span class="flag" data-text="posizionato">Posizionata</span>
@@ -859,7 +859,7 @@
 
       <div class="sub-flags dren-detail" id="T-pres-gastro">
         <div class="sub-label">Gastrostomia</div>
-        <div class="mini-group" data-group="T-gastro-stato" data-mode="radio">
+        <div class="mini-group" data-group="T-gastro-stato" data-mode="checkbox">
           <div class="sub-flags-inner">
           <span class="flag" data-text="medicato">Medicata</span>
           <span class="flag" data-text="posizionato">Posizionata</span>
@@ -1738,12 +1738,17 @@ function render(){
   (state['T-presidi'] || []).forEach(v => {
     const cfg = PRESIDIO_CONFIG[v];
     if(!cfg) return;
-    let statoTxt = state[cfg.stato] && state[cfg.stato][0];
-    if(!statoTxt) return;
+    const stati = state[cfg.stato] || [];
     // la concordanza qui dipende dal presidio (la linea arteriosa è "rimossa" anche in un
     // paziente maschio), non dal sesso del paziente come in feminizeText
-    if(cfg.femminile) statoTxt = statoTxt.replace(/o$/, 'a');
-    const frase = statoTxt === 'cambio linea' ? cfg.cambioLinea : `${cfg.label} ${statoTxt}`;
+    const aggettivi = stati.filter(s => s !== 'cambio linea')
+      .map(s => cfg.femminile ? s.replace(/o$/, 'a') : s);
+    // il cambio linea è un'azione, non uno stato: si accoda agli aggettivi del presidio già
+    // nominato ("CVC medicato, eseguito cambio linea") e nomina lui il presidio solo se è
+    // l'unica cosa da dire ("eseguito cambio linea del CVC").
+    const frase = aggettivi.length
+      ? `${cfg.label} ${joinItalian(aggettivi)}` + (stati.includes('cambio linea') ? ', eseguito cambio linea' : '')
+      : (stati.includes('cambio linea') ? cfg.cambioLinea : '');
     if(!frase) return;
     const isSource = sourceMatches(cfg.stato) || (sourceMatches('T-presidi') && pieceMatches(cfg.pieceKey));
     tParts.push({ pieceKey: cfg.pieceKey, text: mark(isSource, frase) });
@@ -2286,7 +2291,11 @@ async function saveConsegna(){
     // a mano e le note su riga propria, che altrimenti andrebbero perse ricaricando la
     // consegna (senza di loro il caricamento rigenera tutto da zero dai soli flag).
     stato: JSON.parse(JSON.stringify({ groups: state, manualPieces, blockNotes })),
-    inputs: collectInputs()
+    inputs: collectInputs(),
+    // La data mostrata nell'elenco (e l'ordinamento) è quella dell'ULTIMO salvataggio: una
+    // consegna aggiornata a fine turno deve dire l'ora in cui è stata scritta davvero, e
+    // risalire in cima, non restare ferma all'ora in cui era stata aperta la prima volta.
+    creato_il: new Date().toISOString()
   };
   // Se la consegna è stata aperta dall'elenco, "Salva" la aggiorna: prima ogni salvataggio
   // creava una riga nuova, quindi aggiornare una consegna a fine turno la duplicava.
