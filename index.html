@@ -817,6 +817,7 @@
           <span class="flag" data-text="medicato">Medicato</span>
           <span class="flag" data-text="posizionato">Posizionato</span>
           <span class="flag" data-text="rimosso">Rimosso</span>
+          <span class="flag" data-text="cambio linea">Cambio linea</span>
           </div>
         </div>
       </div>
@@ -828,6 +829,7 @@
           <span class="flag" data-text="medicato">Medicato</span>
           <span class="flag" data-text="posizionato">Posizionato</span>
           <span class="flag" data-text="rimosso">Rimosso</span>
+          <span class="flag" data-text="cambio linea">Cambio linea</span>
           </div>
         </div>
       </div>
@@ -839,6 +841,7 @@
           <span class="flag" data-text="medicato">Medicata</span>
           <span class="flag" data-text="posizionato">Posizionata</span>
           <span class="flag" data-text="rimosso">Rimossa</span>
+          <span class="flag" data-text="cambio linea">Cambio linea</span>
           </div>
         </div>
       </div>
@@ -885,8 +888,6 @@
       <div class="flags">
         <span class="flag" data-text="eseguita igiene a letto">Igiene a letto</span>
         <span class="flag" data-text="posturato">Paziente posturato</span>
-        <span class="flag" data-text="eseguiti cambi linea">Cambi linea eseguiti</span>
-        <span class="flag" data-text="eseguito cambio linea arteria">Cambio linea arteria</span>
         <span class="flag" data-text="terapia somministrata come da schema">Terapia come da schema</span>
       </div>
     </div>
@@ -1331,10 +1332,13 @@ function updateVentParamsVisibility(){
 // I presidi della sezione Attività: ognuno ha la propria frase (pieceKey) e il proprio stato
 // (medicato / posizionato / rimosso). 'femminile' serve alla concordanza dello stato, che
 // dipende dal presidio e non dal sesso del paziente.
+// 'cambioLinea' è la frase intera perché "CVC cambio linea" non si può dire: è un'azione
+// sulla linea, non uno stato del presidio, e ce l'hanno solo i presidi che una linea ce
+// l'hanno (CVC, CVP, arteria).
 const PRESIDIO_CONFIG = {
-  'CVC':             { pieceKey: 'T-pres-cvc',     label: 'CVC',             femminile: false, stato: 'T-cvc-stato' },
-  'CVP':             { pieceKey: 'T-pres-cvp',     label: 'CVP',             femminile: false, stato: 'T-cvp-stato' },
-  'linea arteriosa': { pieceKey: 'T-pres-arteria', label: 'linea arteriosa', femminile: true,  stato: 'T-arteria-stato' },
+  'CVC':             { pieceKey: 'T-pres-cvc',     label: 'CVC',             femminile: false, stato: 'T-cvc-stato',     cambioLinea: 'eseguito cambio linea del CVC' },
+  'CVP':             { pieceKey: 'T-pres-cvp',     label: 'CVP',             femminile: false, stato: 'T-cvp-stato',     cambioLinea: 'eseguito cambio linea del CVP' },
+  'linea arteriosa': { pieceKey: 'T-pres-arteria', label: 'linea arteriosa', femminile: true,  stato: 'T-arteria-stato', cambioLinea: 'eseguito cambio linea arteriosa' },
   'tracheostomia':   { pieceKey: 'T-pres-tracheo', label: 'tracheostomia',   femminile: true,  stato: 'T-tracheo-stato' },
   'gastrostomia':    { pieceKey: 'T-pres-gastro',  label: 'gastrostomia',    femminile: true,  stato: 'T-gastro-stato' }
 };
@@ -1739,8 +1743,10 @@ function render(){
     // la concordanza qui dipende dal presidio (la linea arteriosa è "rimossa" anche in un
     // paziente maschio), non dal sesso del paziente come in feminizeText
     if(cfg.femminile) statoTxt = statoTxt.replace(/o$/, 'a');
+    const frase = statoTxt === 'cambio linea' ? cfg.cambioLinea : `${cfg.label} ${statoTxt}`;
+    if(!frase) return;
     const isSource = sourceMatches(cfg.stato) || (sourceMatches('T-presidi') && pieceMatches(cfg.pieceKey));
-    tParts.push({ pieceKey: cfg.pieceKey, text: mark(isSource, `${cfg.label} ${statoTxt}`) });
+    tParts.push({ pieceKey: cfg.pieceKey, text: mark(isSource, frase) });
   });
 
   if(state['T-esami'] && state['T-esami'].length){
