@@ -730,6 +730,13 @@
           <span class="inline-input">quantità <input type="text" inputmode="decimal" id="tor-qta-val" placeholder="ml/24h"></span>
           </div>
         </div>
+        <div class="mini-group" data-group="AC-tor-azioni" data-mode="checkbox">
+          <div class="sub-flags-inner">
+          <span class="flag" data-text="medicato">Medicato</span>
+          <span class="flag" data-text="posizionato">Posizionato</span>
+          <span class="flag" data-text="rimosso">Rimosso</span>
+          </div>
+        </div>
       </div>
 
       <div class="sub-flags dren-detail" id="dren-addominale">
@@ -749,6 +756,13 @@
           <span class="inline-input">quantità <input type="text" inputmode="decimal" id="add-qta-val" placeholder="ml/24h"></span>
           </div>
         </div>
+        <div class="mini-group" data-group="AC-add-azioni" data-mode="checkbox">
+          <div class="sub-flags-inner">
+          <span class="flag" data-text="medicato">Medicato</span>
+          <span class="flag" data-text="posizionato">Posizionato</span>
+          <span class="flag" data-text="rimosso">Rimosso</span>
+          </div>
+        </div>
       </div>
 
       <div class="sub-flags dren-detail" id="dren-cranico">
@@ -766,6 +780,13 @@
           <span class="flag" data-text="ematico">Ematico</span>
           <span class="flag" data-text="purulento">Purulento</span>
           <span class="inline-input">quantità <input type="text" inputmode="decimal" id="cra-qta-val" placeholder="ml/24h"></span>
+          </div>
+        </div>
+        <div class="mini-group" data-group="AC-cra-azioni" data-mode="checkbox">
+          <div class="sub-flags-inner">
+          <span class="flag" data-text="medicato">Medicato</span>
+          <span class="flag" data-text="posizionato">Posizionato</span>
+          <span class="flag" data-text="rimosso">Rimosso</span>
           </div>
         </div>
       </div>
@@ -790,6 +811,13 @@
           <span class="flag" data-text="ematico">Ematico</span>
           <span class="flag" data-text="purulento">Purulento</span>
           <span class="inline-input">quantità <input type="text" inputmode="decimal" id="alt-qta-val" placeholder="ml/24h"></span>
+          </div>
+        </div>
+        <div class="mini-group" data-group="AC-alt-azioni" data-mode="checkbox">
+          <div class="sub-flags-inner">
+          <span class="flag" data-text="medicato">Medicato</span>
+          <span class="flag" data-text="posizionato">Posizionato</span>
+          <span class="flag" data-text="rimosso">Rimosso</span>
           </div>
         </div>
       </div>
@@ -1008,7 +1036,10 @@ function pieceKeysForGroup(name){
   if(['AC-add-aspirazione','AC-add-drenato','add-asp-val','add-qta-val'].includes(name)) return ['AC-addominale'];
   if(['AC-cra-aspirazione','AC-cra-drenato','cra-asp-val','cra-qta-val'].includes(name)) return ['AC-cranico'];
   if(['AC-alt-aspirazione','AC-alt-drenato','alt-asp-val','alt-qta-val','altro-sede-val'].includes(name)) return ['AC-altro'];
-  if(name === 'AC-drenaggi') return ['AC-toracico','AC-addominale','AC-cranico','AC-altro'];
+  // le azioni sul drenaggio, come quelle sui presidi, danno una frase per azione: quale sia
+  // lo dice il flag cliccato (nel click handler), qui si scongelano tutte
+  if(DRENAGGIO_AZIONI_GROUPS.includes(name)) return DRENAGGIO_PIECE_KEYS.slice();
+  if(name === 'AC-drenaggi') return ['AC-toracico','AC-addominale','AC-cranico','AC-altro', ...DRENAGGIO_PIECE_KEYS];
   // Le frasi dei presidi sono una per azione: né il presidio né la sua sottocategoria bastano
   // da soli a sapere QUALE scongelare (il click handler lo ricava dal flag appena cliccato),
   // quindi qui si scongelano tutte, che è innocuo per quelle non congelate.
@@ -1179,8 +1210,9 @@ document.querySelectorAll('.flag').forEach(flag => {
       // la sottocategoria di un presidio dice l'azione, quindi la frase da evidenziare è
       // quella di quell'azione; il chip del presidio da solo non ne indica una sola
       : PRESIDIO_STATO_GROUPS.includes(groupName) ? (AZIONE_PIECE_BY_STATO[flag.dataset.text] || null)
+      : DRENAGGIO_AZIONI_GROUPS.includes(groupName) ? (AZIONE_DRENAGGIO_PIECE_BY_STATO[flag.dataset.text] || null)
       : null;
-    const pieceKeys = groupName === 'AC-drenaggi' ? ['AC-' + flag.dataset.text]
+    const pieceKeys = groupName === 'AC-drenaggi' ? ['AC-' + flag.dataset.text, ...DRENAGGIO_PIECE_KEYS]
       : groupName === 'U-via-enterale-sel' ? ['U-alimentazione', ACCESSO_PIECE_BY_TEXT[flag.dataset.text]]
       : pieceKeysForGroup(groupName);
     unfreezePieceKeys(pieceKeys.concat(extraPieceKeys).filter(Boolean));
@@ -1355,6 +1387,18 @@ const AZIONI_PRESIDI = [
   { stato: 'cambio linea', pieceKey: 'T-pres-cambio-linea',  frase: 'eseguito cambio linea di' },
   { stato: 'rimosso',      pieceKey: 'T-pres-rimozione',     frase: 'eseguita rimozione di' }
 ];
+// Gli stessi tre "che cosa ci è stato fatto" valgono per i drenaggi (una linea non ce l'hanno,
+// quindi niente cambio linea), e si raggruppano allo stesso modo.
+const AZIONI_DRENAGGI = [
+  { stato: 'medicato',    pieceKey: 'AC-medicazione',    frase: 'eseguita medicazione' },
+  { stato: 'posizionato', pieceKey: 'AC-posizionamento', frase: 'eseguito posizionamento' },
+  { stato: 'rimosso',     pieceKey: 'AC-rimozione',      frase: 'eseguita rimozione' }
+];
+const DRENAGGIO_PIECE_KEYS = AZIONI_DRENAGGI.map(a => a.pieceKey);
+const DRENAGGIO_AZIONI_GROUPS = ['AC-tor-azioni', 'AC-add-azioni', 'AC-cra-azioni', 'AC-alt-azioni'];
+const AZIONE_DRENAGGIO_PIECE_BY_STATO = {};
+AZIONI_DRENAGGI.forEach(a => { AZIONE_DRENAGGIO_PIECE_BY_STATO[a.stato] = a.pieceKey; });
+
 const PRESIDIO_PIECE_KEYS = AZIONI_PRESIDI.map(a => a.pieceKey);
 const PRESIDIO_STATO_GROUPS = Object.keys(PRESIDIO_CONFIG).map(k => PRESIDIO_CONFIG[k].stato);
 const AZIONE_PIECE_BY_STATO = {};
@@ -1371,7 +1415,7 @@ const PIECE_ORDER = {
   vent: ['V-supporto', 'V-spo2', 'V-secrezioni', 'V-scialorrea'],
   circolo: ['C-stato', 'C-cute', 'C-temp'],
   diuresi: ['U-diuresi', 'U-alimentazione', 'U-sng', 'U-gastro', 'U-nava', 'U-ristagno', 'U-alvo'],
-  drenaggi: ['AC-toracico', 'AC-addominale', 'AC-cranico', 'AC-altro'],
+  drenaggi: ['AC-toracico', 'AC-addominale', 'AC-cranico', 'AC-altro', ...DRENAGGIO_PIECE_KEYS],
   // 'T-medicazione-dispositivi' era la vecchia categoria unica dei presidi: resta qui solo
   // perché una consegna salvata allora può averla riscritta a mano, e quel testo va ancora
   // mostrato al posto giusto (i chip di oggi generano un pezzo per azione).
@@ -1706,9 +1750,9 @@ function render(){
   // 5 - Drenaggi (each selected drain has its own independent detail)
   let acParts = [];
   const drenConfig = {
-    toracico:   { label: 'drenaggio toracico',   asp: 'AC-tor-aspirazione', dren: 'AC-tor-drenato', aspId: 'tor-asp-val', qtaId: 'tor-qta-val' },
-    addominale: { label: 'drenaggio addominale', asp: 'AC-add-aspirazione', dren: 'AC-add-drenato', aspId: 'add-asp-val', qtaId: 'add-qta-val' },
-    cranico:    { label: 'drenaggio cranico',    asp: 'AC-cra-aspirazione', dren: 'AC-cra-drenato', aspId: 'cra-asp-val', qtaId: 'cra-qta-val' }
+    toracico:   { label: 'drenaggio toracico',   asp: 'AC-tor-aspirazione', dren: 'AC-tor-drenato', aspId: 'tor-asp-val', qtaId: 'tor-qta-val', azioni: 'AC-tor-azioni' },
+    addominale: { label: 'drenaggio addominale', asp: 'AC-add-aspirazione', dren: 'AC-add-drenato', aspId: 'add-asp-val', qtaId: 'add-qta-val', azioni: 'AC-add-azioni' },
+    cranico:    { label: 'drenaggio cranico',    asp: 'AC-cra-aspirazione', dren: 'AC-cra-drenato', aspId: 'cra-asp-val', qtaId: 'cra-qta-val', azioni: 'AC-cra-azioni' }
   };
   function buildDrenaggio(pieceKey, label, aspGroup, drenGroup, aspInputId, qtaInputId, extraKeys){
     let materialeTxt = '';
@@ -1747,15 +1791,36 @@ function render(){
     return { pieceKey, text: mark(isSource, str) };
   }
 
+  const drenaggiPresenti = [];
   (state['AC-drenaggi'] || []).forEach(d => {
     if(d === 'altro'){
       const sede = document.getElementById('altro-sede-val') ? document.getElementById('altro-sede-val').value.trim() : '';
       const label = sede ? `drenaggio ${sede}` : 'drenaggio';
       acParts.push(buildDrenaggio('AC-altro', label, 'AC-alt-aspirazione', 'AC-alt-drenato', 'alt-asp-val', 'alt-qta-val', ['altro-sede-val']));
+      drenaggiPresenti.push({ label, azioni: 'AC-alt-azioni' });
     } else if(drenConfig[d]){
       const cfg = drenConfig[d];
       acParts.push(buildDrenaggio('AC-' + d, cfg.label, cfg.asp, cfg.dren, cfg.aspId, cfg.qtaId));
+      drenaggiPresenti.push({ label: cfg.label, azioni: cfg.azioni });
     }
+  });
+
+  // Come per i presidi, quello che è stato fatto al drenaggio si raggruppa per azione
+  // ("eseguita medicazione dei drenaggi toracico e addominale"), invece di ripetere la stessa
+  // frase drenaggio per drenaggio. Sono frasi a sé: la riga del drenaggio dice com'è messo
+  // adesso, queste dicono che cosa ci è stato fatto nel turno.
+  AZIONI_DRENAGGI.forEach(az => {
+    const coinvolti = drenaggiPresenti.filter(p => (state[p.azioni] || []).includes(az.stato));
+    if(!coinvolti.length) return;
+    const nomi = coinvolti.map(p => p.label.replace(/^drenaggio\s*/, ''));
+    const txt = coinvolti.length === 1
+      ? `${az.frase} del ${coinvolti[0].label}`
+      : nomi.every(Boolean)
+        ? `${az.frase} dei drenaggi ${joinItalian(nomi)}`
+        // un "altro" drenaggio senza sede non ha un nome da mettere in elenco
+        : `${az.frase} di ${joinItalian(coinvolti.map(p => p.label))}`;
+    const isSource = sourceMatches('AC-drenaggi', ...DRENAGGIO_AZIONI_GROUPS) && pieceMatches(az.pieceKey);
+    acParts.push({ pieceKey: az.pieceKey, text: mark(isSource, txt) });
   });
 
   // 6 - Attività di turno
@@ -1773,13 +1838,21 @@ function render(){
   });
 
   if(state['T-esami'] && state['T-esami'].length){
-    const strumentali = new Set(['fibroscopia', 'RX', 'TAC', 'risonanza magnetica', 'EEG']);
-    const esamiArr = state['T-esami'].filter(t => !strumentali.has(t));
-    const strumentaliArr = state['T-esami'].filter(t => strumentali.has(t));
+    // genere di ogni esame strumentale, per concordare "eseguito/a/i/e": con più esami di
+    // genere diverso vince il maschile plurale, come vuole l'italiano
+    const strumentali = { 'fibroscopia': 'f', 'RX': 'm', 'TAC': 'f', 'risonanza magnetica': 'f', 'EEG': 'm' };
+    const esamiArr = state['T-esami'].filter(t => !strumentali[t]);
+    const strumentaliArr = state['T-esami'].filter(t => strumentali[t]);
     // "emogasanalisi" si abbrevia in EGA solo nel testo prodotto: il chip resta per esteso, e
     // il suo data-text è la chiave con cui le consegne già salvate riaccendono i chip.
     const esamiBits = esamiArr.map(t => t.replace('emogasanalisi', 'EGA'));
-    if(strumentaliArr.length) esamiBits.push('eseguiti ' + joinItalian(strumentaliArr));
+    if(strumentaliArr.length){
+      const tutteFemminili = strumentaliArr.every(t => strumentali[t] === 'f');
+      const participio = strumentaliArr.length === 1
+        ? (tutteFemminili ? 'eseguita' : 'eseguito')
+        : (tutteFemminili ? 'eseguite' : 'eseguiti');
+      esamiBits.push(participio + ' ' + joinItalian(strumentaliArr));
+    }
     tParts.push({ pieceKey: 'T-esami', text: mark(sourceMatches('T-esami'), esamiBits.join('. ')) });
   }
 
