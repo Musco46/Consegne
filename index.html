@@ -1502,7 +1502,9 @@ function render(){
         if(applies.includes('flusso') && flusso) paramBits.push(`flusso ${flusso} L/min`);
         if(applies.includes('atti') && atti) paramBits.push(`${atti} atti/min`);
       }
-      const modeVal = applies.includes('modalita') ? document.getElementById('modalita-val').value.trim() : '';
+      // la modalità è una sigla (PC, SIMV, PS...): va sempre in maiuscolo, comunque la si
+      // scriva nel campo
+      const modeVal = applies.includes('modalita') ? document.getElementById('modalita-val').value.trim().toUpperCase() : '';
       let extraTxt = deviceTxt || viaTxt;
       let supTxt;
       if(vSupporto.indexOf('occhialini') !== -1){
@@ -1564,7 +1566,10 @@ function render(){
   let cTemp = state['C-temp'] && state['C-temp'][0];
   const tempVal = document.getElementById('temp-val').value;
   if(cTemp){
-    cParts.push({ pieceKey: 'C-temp', text: mark(sourceMatches('C-temp', 'temp-val'), tempVal ? `${cTemp}, TC ${tempVal}°C` : cTemp) });
+    // "apiretico" dice già che la temperatura è nella norma: il valore si scrive solo quando
+    // è quello il dato da passare (febbre, ipotermia), anche se il campo è rimasto compilato.
+    const mostraTC = tempVal && cTemp !== 'apiretico';
+    cParts.push({ pieceKey: 'C-temp', text: mark(sourceMatches('C-temp', 'temp-val'), mostraTC ? `${cTemp}, TC ${tempVal}°C` : cTemp) });
   } else if(tempVal){
     cParts.push({ pieceKey: 'C-temp', text: mark(sourceMatches('C-temp', 'temp-val'), `TC ${tempVal}°C`) });
   }
@@ -1576,9 +1581,11 @@ function render(){
   let uQuantita = state['U-quantita'] && state['U-quantita'][0];
   if(uDiuresi){
     // La quantità qualifica la diuresi stessa e prende il posto di "valida" ("diuresi
-    // abbondante nel catetere vescicale"), invece di essere appesa in coda alla frase
-    // ("diuresi valida nel catetere vescicale, abbondante").
-    let diuresiTxt = uDiuresi;
+    // abbondante nel CV"), invece di essere appesa in coda alla frase ("diuresi valida nel
+    // CV, abbondante"). L'abbreviazione è solo nel testo prodotto: i chip restano leggibili
+    // per esteso, e il loro data-text è anche la chiave con cui le consegne già salvate
+    // riaccendono i chip al caricamento.
+    let diuresiTxt = uDiuresi.replace('catetere vescicale', 'CV');
     if(uQuantita){
       diuresiTxt = diuresiTxt.includes('valida')
         ? diuresiTxt.replace('valida', uQuantita)
@@ -1624,7 +1631,7 @@ function render(){
       // Se non è stato indicato un ristagno, la nutrizione si dà per ben tollerata; quando
       // invece c'è, lo dice già la frase del Ristagno poco più sotto.
       const ristagnoScelto = !!(state['U-ristagno-sel'] && state['U-ristagno-sel'][0]);
-      displayArr.push('in nutrizione enterale tramite ' + joinItalian(nutrizioneDevices.map(d => d.label))
+      displayArr.push('in NE tramite ' + joinItalian(nutrizioneDevices.map(d => d.label))
         + (ristagnoScelto ? '' : ', ben tollerata'));
     }
     uAlimArr.forEach(a => {
