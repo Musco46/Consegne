@@ -1531,8 +1531,8 @@ function render(){
     if(vSecr === 'secrezioni scarse' || vSecr === 'secrezioni abbondanti'){
       secrBits.push('bronco-aspirato al bisogno');
     }
-    secrBits.push(vSecr);
     let vAspettoArr = state['V-aspetto-sel'] || [];
+    let aspettoTxt = '';
     if(vAspettoArr.length){
       const viscosita = ['dense', 'semidense', 'fluide', 'semifluide', 'schiumose'];
       const ordered = vAspettoArr.slice().sort((a, b) => {
@@ -1540,7 +1540,16 @@ function render(){
         const bi = viscosita.includes(b) ? 0 : 1;
         return ai - bi;
       });
-      secrBits.push(joinItalian(ordered));
+      aspettoTxt = joinItalian(ordered);
+    }
+    // "scarse" non è un dato da passare: quel chip serve a dire che le secrezioni ci sono (e
+    // ad aprire l'aspetto), non a quantificarle. Quindi le secrezioni si nominano solo per
+    // dirne l'aspetto; se non c'è nemmeno quello resta il solo bronco-aspirato al bisogno.
+    if(vSecr === 'secrezioni scarse'){
+      if(aspettoTxt) secrBits.push('secrezioni ' + aspettoTxt);
+    } else {
+      secrBits.push(vSecr);
+      if(aspettoTxt) secrBits.push(aspettoTxt);
     }
     vParts.push({ pieceKey: 'V-secrezioni', text: mark(sourceMatches('V-secrezioni', 'V-aspetto-sel'), secrBits.join(', ')) });
   }
