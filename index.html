@@ -81,6 +81,9 @@
     transition:background .12s, color .12s, border-color .12s;
   }
   .flag:hover{border-color:#A9B4BD;}
+  /* I chip si usano anche col tab da tastiera (il layout a due colonne è pensato per il
+     desktop): senza un contorno visibile non si capirebbe su quale si è fermi. */
+  .flag:focus-visible, .saved-item:focus-visible{outline:2px solid var(--n2);outline-offset:2px;}
   .flag.on{background:var(--ink);border-color:var(--ink);color:white;}
   .s1 .flag.on{background:var(--n1);border-color:var(--n1);color:white;}
   .s2 .flag.on{background:var(--n2);border-color:var(--n2);color:white;}
@@ -998,11 +1001,18 @@ let blockNotes = [];     // [{ after: sectionKey | '_end' | null, text }]
 // coordinate che puntavano a una stringa non più esistente.
 let lastRenderedLines = []; // [{ sectionKey, noteIndex, segs:[{keys,text,manual}], seps:[], text }]
 
+// Quale accesso enterale ha nominato il chip appena cliccato. Serve sia a scongelare sia a
+// evidenziare solo quell'accesso, quindi sta qui e non dentro un singolo gestore.
+const ACCESSO_PIECE_BY_TEXT = { 'tramite SNG': 'U-sng', 'tramite gastrostomia': 'U-gastro', 'tramite sondino NAVA': 'U-nava' };
+
 // Dato il gruppo di stato (o l'id di un campo) appena cliccato/compilato, restituisce le
 // chiavi dei "pezzi" da scongelare (tornano automatici). Più di una chiave quando lo stesso
 // campo può contribuire a pezzi diversi a seconda del resto dello stato: scongelarli
 // entrambi è innocuo (chi non era congelato resta un no-op).
-function pieceKeysForGroup(name){
+// 'flagText' è il data-text del chip appena cliccato, quando c'è: alcuni gruppi elencano più
+// elementi indipendenti (quali drenaggi/accessi sono presenti) e senza sapere quale è stato
+// toccato si potrebbero solo scongelare tutti.
+function pieceKeysForGroup(name, flagText){
   if(!name) return [];
   if(name === 'eta-val') return ['neuro-open'];
   // 'neuro-stato' è il pezzo (la frase su coscienza/reattività/agitazione), 'neuro' è la
@@ -1022,13 +1032,15 @@ function pieceKeysForGroup(name){
   if(name === 'U-sng-stato') return ['U-alimentazione', 'U-sng'];
   if(name === 'U-gastro-stato') return ['U-alimentazione', 'U-gastro'];
   if(name === 'U-nava-stato') return ['U-alimentazione', 'U-nava'];
-  // 'U-via-enterale-sel' (quale accesso è presente) non basta da solo a sapere QUALE
-  // accesso scongelare: il click handler usa il testo del flag appena cliccato (es.
-  // "tramite SNG") per scongelare solo quel dispositivo, senza toccare gli altri due né
+  // 'U-via-enterale-sel' dice quali accessi sono presenti, non quale è stato appena toccato:
+  // con il testo del chip si scongela solo quel dispositivo, senza toccare gli altri due né
   // il Ristagno, che è una categoria a sé e non dipende da quale specifico accesso c'è.
-  // Il Ristagno decide però anche se la nutrizione enterale è "ben tollerata", quindi
-  // scongela pure l'Alimentazione: altrimenti resterebbe scritto "ben tollerata" accanto
-  // a un ristagno appena indicato.
+  if(name === 'U-via-enterale-sel'){
+    return ['U-alimentazione'].concat(flagText ? [ACCESSO_PIECE_BY_TEXT[flagText]] : Object.keys(ACCESSO_PIECE_BY_TEXT).map(k => ACCESSO_PIECE_BY_TEXT[k]));
+  }
+  // Il Ristagno decide anche se la nutrizione enterale è "ben tollerata", quindi scongela
+  // pure l'Alimentazione: altrimenti resterebbe scritto "ben tollerata" accanto a un
+  // ristagno appena indicato.
   if(name === 'U-ristagno-sel' || name === 'ristagno-qta-val') return ['U-ristagno', 'U-alimentazione'];
   if(name === 'U-alimentazione') return ['U-alimentazione'];
   if(['U-diuresi','U-lasix','U-urine','U-quantita'].includes(name)) return ['U-diuresi'];
@@ -1039,7 +1051,12 @@ function pieceKeysForGroup(name){
   // le azioni sul drenaggio, come quelle sui presidi, danno una frase per azione: quale sia
   // lo dice il flag cliccato (nel click handler), qui si scongelano tutte
   if(DRENAGGIO_AZIONI_GROUPS.includes(name)) return DRENAGGIO_PIECE_KEYS.slice();
-  if(name === 'AC-drenaggi') return ['AC-toracico','AC-addominale','AC-cranico','AC-altro', ...DRENAGGIO_PIECE_KEYS];
+  // Come sopra per gli accessi: 'AC-drenaggi' elenca i drenaggi presenti, il chip dice quale
+  // è stato toccato. Senza (chiamata che non parte da un clic) si scongelano tutti, che è
+  // innocuo per quelli non congelati.
+  if(name === 'AC-drenaggi'){
+    return (flagText ? ['AC-' + flagText] : ['AC-toracico','AC-addominale','AC-cranico','AC-altro']).concat(DRENAGGIO_PIECE_KEYS);
+  }
   // Le frasi dei presidi sono una per azione: né il presidio né la sua sottocategoria bastano
   // da soli a sapere QUALE scongelare (il click handler lo ricava dal flag appena cliccato),
   // quindi qui si scongelano tutte, che è innocuo per quelle non congelate.
@@ -1098,6 +1115,43 @@ document.querySelectorAll('input, textarea:not(#output)').forEach(el => {
       el.blur();
     }
   });
+});
+
+// Tutti i campi compilabili. Le vecchie query elencavano "number, text, search" perché i
+// campi cambiano tipo (vedi hardening qui sopra): un elenco di tipi da tenere aggiornato a
+// mano è solo un modo per dimenticarsene: qui si prendono tutti gli <input> e basta (la
+// textarea della consegna non è un input, quindi resta fuori come deve).
+function valueInputs(){
+  return document.querySelectorAll('input');
+}
+
+// I chip sono <span>: senza questo non si raggiungono col tab e uno screen reader non li
+// annuncia come comandi a due stati. Si assegna qui, in un punto solo, invece che in ~150
+// attributi sparsi nell'HTML, così nessun chip nuovo può nascere inaccessibile.
+document.querySelectorAll('.flag').forEach(f => {
+  f.setAttribute('role', 'button');
+  f.setAttribute('tabindex', '0');
+});
+
+// aria-pressed si ricalcola sempre dalla classe .on invece di essere aggiornato in ognuno
+// dei punti che la toccano (clic, deselezione forzata dal digiuno, chiusura di una
+// sottocategoria, azzeramento, caricamento di una consegna): un solo passaggio dopo ogni
+// cambiamento non può andare fuori sincrono con quello che si vede.
+function refreshFlagAria(){
+  document.querySelectorAll('.flag').forEach(f => {
+    f.setAttribute('aria-pressed', f.classList.contains('on') ? 'true' : 'false');
+  });
+}
+refreshFlagAria();
+
+// Invio e Spazio devono attivare il chip come il clic. Lo Spazio va fermato, altrimenti
+// oltre a selezionare fa anche scorrere la pagina, che qui si sposta già da sola.
+document.addEventListener('keydown', e => {
+  if(e.key !== 'Enter' && e.key !== ' ') return;
+  const flag = e.target.closest && e.target.closest('.flag');
+  if(!flag) return;
+  e.preventDefault();
+  flag.click();
 });
 
 // "A digiuno" esclude ogni altra forma di alimentazione (per os, parenterale, biberon, al
@@ -1198,13 +1252,9 @@ document.querySelectorAll('.flag').forEach(flag => {
     const extraPieceKeys = enforceDigiunoExclusivity(groupName, flag);
 
     highlightSource = groupName;
-    // I gruppi "AC-drenaggi" e "U-via-enterale-sel" (quale drenaggio/accesso è presente) non
-    // bastano da soli a sapere QUALE elemento scongelare: usiamo il testo del flag appena
-    // cliccato (es. "toracico", "tramite SNG") per scongelare solo quello, senza toccare gli
-    // altri elementi dello stesso gruppo. Lo stesso vale per l'evidenziazione: senza
-    // highlightPiece ogni accesso/drenaggio presente riceverebbe la propria coppia di
-    // marcatori e finirebbe evidenziato il primo dell'elenco invece di quello appena toccato.
-    const ACCESSO_PIECE_BY_TEXT = { 'tramite SNG': 'U-sng', 'tramite gastrostomia': 'U-gastro', 'tramite sondino NAVA': 'U-nava' };
+    // Senza highlightPiece, un gruppo che elenca più elementi indipendenti (i drenaggi o gli
+    // accessi presenti) darebbe a ognuno la propria coppia di marcatori, e finirebbe
+    // evidenziato il primo dell'elenco invece di quello appena toccato.
     highlightPiece = groupName === 'AC-drenaggi' ? 'AC-' + flag.dataset.text
       : groupName === 'U-via-enterale-sel' ? (ACCESSO_PIECE_BY_TEXT[flag.dataset.text] || null)
       // la sottocategoria di un presidio dice l'azione, quindi la frase da evidenziare è
@@ -1212,10 +1262,8 @@ document.querySelectorAll('.flag').forEach(flag => {
       : PRESIDIO_STATO_GROUPS.includes(groupName) ? (AZIONE_PIECE_BY_STATO[flag.dataset.text] || null)
       : DRENAGGIO_AZIONI_GROUPS.includes(groupName) ? (AZIONE_DRENAGGIO_PIECE_BY_STATO[flag.dataset.text] || null)
       : null;
-    const pieceKeys = groupName === 'AC-drenaggi' ? ['AC-' + flag.dataset.text, ...DRENAGGIO_PIECE_KEYS]
-      : groupName === 'U-via-enterale-sel' ? ['U-alimentazione', ACCESSO_PIECE_BY_TEXT[flag.dataset.text]]
-      : pieceKeysForGroup(groupName);
-    unfreezePieceKeys(pieceKeys.concat(extraPieceKeys).filter(Boolean));
+    unfreezePieceKeys(pieceKeysForGroup(groupName, flag.dataset.text).concat(extraPieceKeys).filter(Boolean));
+    refreshFlagAria();
     render();
     // Si ancora al ".group" più esterno (non al gruppo/sotto-pannello più vicino usato per
     // la logica di stato): categorie come Emodinamica o Diuresi hanno più contenitori
@@ -1917,6 +1965,10 @@ function render(){
     segs: l.segs,
     seps: l.seps
   }));
+
+  // Ogni cambiamento che passa di qui (chip, campi) finisce nella bozza locale. Le modifiche
+  // scritte a mano nella consegna non fanno partire un render, quindi si salvano da sé.
+  saveDraft();
 }
 
 // Estrae dal testo marcato l'intervallo esatto (se presente) corrispondente all'ultimo
@@ -2122,6 +2174,7 @@ document.getElementById('output').addEventListener('input', () => {
   blockNotes = lastRenderedLines.filter(l => l.note).map(l => l.note);
 
   clearOutputHighlight();
+  saveDraft();
 });
 
 function copyOutput(){
@@ -2342,7 +2395,7 @@ function resetAll(){
   document.querySelectorAll('.flag').forEach(f => f.classList.remove('on'));
   document.querySelectorAll('.sub-flags').forEach(s => s.classList.remove('show'));
   document.querySelectorAll('.params-box').forEach(p => p.classList.remove('show'));
-  document.querySelectorAll('input[type=number], input[type=text], input[type=search]').forEach(i => i.value = '');
+  valueInputs().forEach(i => i.value = '');
   for(const k in state) state[k] = [];
   manualPieces = {};
   blockNotes = [];
@@ -2351,8 +2404,12 @@ function resetAll(){
   highlightPiece = null;
   currentConsegnaId = null;
   currentConsegnaLetto = null;
+  refreshFlagAria();
   render();
   clearOutputHighlight();
+  // "Cancella" vuol dire ripartire puliti: la bozza va tolta DOPO il render, che ne
+  // programma uno di suo e va annullato insieme al resto.
+  clearDraft();
 }
 
 // Va bene sia per il testo sia per il valore di un attributo: apici inclusi (innerHTML da
@@ -2430,7 +2487,7 @@ async function saveConsegna(){
 
 function collectInputs(){
   const obj = {};
-  document.querySelectorAll('input[type=number], input[type=text], input[type=search]').forEach(i => {
+  valueInputs().forEach(i => {
     if(i.id) obj[i.id] = i.value;
   });
   return obj;
@@ -2441,7 +2498,7 @@ function applyState(savedState, savedInputs){
   document.querySelectorAll('.flag').forEach(f => f.classList.remove('on'));
   document.querySelectorAll('.sub-flags').forEach(s => s.classList.remove('show'));
   document.querySelectorAll('.params-box').forEach(p => p.classList.remove('show'));
-  document.querySelectorAll('input[type=number], input[type=text], input[type=search]').forEach(i => i.value = '');
+  valueInputs().forEach(i => i.value = '');
   for(const k in state) state[k] = [];
 
   // restore state object
@@ -2483,6 +2540,7 @@ function applyState(savedState, savedInputs){
     });
   });
   updateVentParamsVisibility();
+  refreshFlagAria();
 }
 
 // Un solo gestore sul contenitore, invece di un onclick inline per riga: gli id non finiscono
@@ -2494,6 +2552,17 @@ document.getElementById('saved-list').addEventListener('click', e => {
   else loadConsegna(card.dataset.id);
 });
 
+// Le card sono <div>: come i chip, vanno attivabili anche da tastiera. Il tasto Elimina al
+// loro interno è un <button> vero, che genera già un clic da solo: qui lo si lascia stare,
+// altrimenti l'eliminazione partirebbe due volte.
+document.getElementById('saved-list').addEventListener('keydown', e => {
+  if(e.key !== 'Enter' && e.key !== ' ') return;
+  const card = e.target.closest('.saved-item');
+  if(!card || e.target.closest('[data-action="delete"]')) return;
+  e.preventDefault();
+  card.click();
+});
+
 async function loadSavedList(){
   const container = document.getElementById('saved-list');
   const section = document.getElementById('saved-section');
@@ -2503,7 +2572,10 @@ async function loadSavedList(){
   }
   section.style.display = '';
   container.innerHTML = '<p class="saved-empty">Caricamento...</p>';
-  const { data: items, error } = await sb.from('consegne_turno').select('*').order('creato_il', { ascending: false });
+  // Solo le colonne che finiscono nelle card. Con "*" si scaricava anche il testo integrale
+  // di OGNI consegna mai salvata (più stato e inputs) per mostrarne letto, età, sesso e data.
+  const { data: items, error } = await sb.from('consegne_turno')
+    .select('id,letto,eta,sesso,creato_il').order('creato_il', { ascending: false });
   if(error){
     console.error('Errore nel caricamento elenco:', error);
     container.innerHTML = '<p class="saved-empty">Impossibile caricare le consegne salvate.</p>';
@@ -2520,7 +2592,7 @@ async function loadSavedList(){
     if(item.eta) meta.push(`${escapeHtml(item.eta)} anni`);
     if(item.sesso) meta.push(escapeHtml(item.sesso));
     const metaStr = meta.join(' · ');
-    return `<div class="saved-item" data-id="${escapeHtml(item.id)}">
+    return `<div class="saved-item" role="button" tabindex="0" data-id="${escapeHtml(item.id)}">
       <button class="saved-item-x" data-action="delete" type="button" title="Elimina">×</button>
       <div class="saved-item-name">Letto ${escapeHtml(item.letto || '—')}</div>
       ${metaStr ? `<div class="saved-item-meta">${metaStr}</div>` : ''}
@@ -2603,6 +2675,10 @@ async function loadConsegna(id){
   currentConsegnaId = item.id;
   currentConsegnaLetto = (item.letto || '').trim();
   clearOutputHighlight();
+  // La consegna appena aperta è da adesso il lavoro in corso: va nella bozza locale, così
+  // sopravvive a un ricaricamento come tutto il resto. Serve anche per il ramo senza stato
+  // qui sopra, che non passa da render().
+  saveDraft();
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
@@ -2620,6 +2696,70 @@ async function deleteConsegna(id){
   loadSavedList();
 }
 
+// Bozza in corso, sul dispositivo. Un ricaricamento accidentale — o il browser del telefono
+// che scarica la scheda mentre si passa a un'altra app, cosa normale durante un turno — non
+// deve far perdere la consegna che si sta scrivendo. Si conserva lo STATO (chip, campi,
+// tratti riscritti a mano, note), non il testo finale: al ritorno render() ricostruisce la
+// consegna identica, esattamente come fa il caricamento di una consegna dall'archivio.
+// Nulla di tutto questo passa dalla rete: resta nel browser di chi sta compilando.
+const DRAFT_KEY = 'consegne-turno-bozza';
+// Oltre questo tempo la bozza non è più "quella che stavo scrivendo" ma quella di un turno
+// passato, di un altro paziente: meglio ripartire puliti che ritrovarsi in pagina dati
+// vecchi da riconoscere e cancellare a mano.
+const DRAFT_MAX_AGE_MS = 16 * 60 * 60 * 1000;
+
+let draftSaveTimer = null;
+function saveDraft(){
+  clearTimeout(draftSaveTimer);
+  // Scrivere a ogni battuta nei campi numerici è inutile: basta fermarsi un attimo.
+  draftSaveTimer = setTimeout(() => {
+    try {
+      localStorage.setItem(DRAFT_KEY, JSON.stringify({
+        salvataIl: Date.now(),
+        groups: state,
+        manualPieces,
+        blockNotes,
+        inputs: collectInputs(),
+        consegnaId: currentConsegnaId,
+        consegnaLetto: currentConsegnaLetto
+      }));
+    } catch(e){
+      // spazio esaurito, o storage negato (Safari in navigazione privata): la bozza è una
+      // rete di sicurezza in più, non deve mai impedire di continuare a compilare
+    }
+  }, 400);
+}
+
+function clearDraft(){
+  clearTimeout(draftSaveTimer);
+  try { localStorage.removeItem(DRAFT_KEY); } catch(e){}
+}
+
+function restoreDraft(){
+  let draft = null;
+  try { draft = JSON.parse(localStorage.getItem(DRAFT_KEY) || 'null'); } catch(e){}
+  if(!draft || !draft.groups) return;
+  if(!draft.salvataIl || Date.now() - draft.salvataIl > DRAFT_MAX_AGE_MS){
+    clearDraft();
+    return;
+  }
+  highlightSource = null;
+  highlightPiece = null;
+  // applyState azzera e ricompila da solo tutti i campi, letto ed età compresi: sono input
+  // con un id, quindi collectInputs li aveva già presi.
+  applyState(draft.groups, draft.inputs);
+  manualPieces = draft.manualPieces || {};
+  blockNotes = draft.blockNotes || [];
+  lastRenderedLines = [];
+  // Se la bozza veniva da una consegna aperta dall'archivio, "Salva" deve continuare ad
+  // aggiornare quella invece di affiancarle una copia.
+  currentConsegnaId = draft.consegnaId || null;
+  currentConsegnaLetto = draft.consegnaLetto || null;
+  render();
+  clearOutputHighlight();
+}
+
+restoreDraft();
 loadSavedList();
 </script>
 
