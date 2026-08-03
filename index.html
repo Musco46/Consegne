@@ -1010,11 +1010,14 @@
 // La generazione della consegna è interamente locale: se lo script del CDN non arriva
 // (offline, rete che lo filtra) NON deve saltare tutto il resto del file, altrimenti nessun
 // chip funziona più. Senza client restano disattivati solo salvataggio ed elenco.
+const SUPABASE_URL = 'https://kxqrtdlbqyhqaumvlafu.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_3Twp4s3IEtLu5EOtJ4bW-g_J4xoSErd';
+
 let sb = null;
 try {
   sb = window.supabase.createClient(
-    'https://kxqrtdlbqyhqaumvlafu.supabase.co',
-    'sb_publishable_3Twp4s3IEtLu5EOtJ4bW-g_J4xoSErd',
+    SUPABASE_URL,
+    SUPABASE_KEY,
     // La sessione resta nel browser e si rinnova da sola, cosi' durante il turno non viene
     // chiesto nulla nemmeno cambiando infermiere: e' la postazione a essere autenticata.
     // A chiudere il turno ci pensa il controllo delle 12 ore piu' in basso.
@@ -2520,18 +2523,51 @@ function escapeHtml(str){
   })[c]);
 }
 
+// Il numero di letto si scrive a mano, e a mano si scrive in modi diversi: "3", "03", "3 a",
+// "letto 3". Per il database sono quattro letti distinti, e la regola "un letto = un
+// paziente" — quella su cui si regge la sovrascrittura — si sfalda senza dire niente: due
+// righe per lo stesso bambino, e quella che si riapre non è quella che si era scritta.
+// Il campo resta libero, perché lo si compila di fretta e con una mano sola: a mettere in
+// ordine si pensa qui, dopo, invece di costringere chi scrive a farlo mentre scrive.
+function normalizzaLetto(valore){
+  return String(valore == null ? '' : valore)
+    .trim()
+    .replace(/^letto\s+/i, '')             // "letto 3" -> "3"
+    .replace(/\s+/g, ' ')
+    .replace(/^0+(?=\d)/, '')              // "03" -> "3", ma il letto "0" resta "0"
+    .replace(/(\d)\s+([A-Za-z])/g, '$1$2') // "3 a" -> "3a"
+    .toUpperCase();
+}
+
+// Si normalizza quando si esce dal campo, non a ogni tasto: mentre si digita "03" il primo
+// carattere è uno zero, e cancellarlo sotto le dita sarebbe solo fastidioso.
+(function(){
+  const el = document.getElementById('letto-val');
+  el.addEventListener('blur', () => {
+    const pulito = normalizzaLetto(el.value);
+    // Si riscrive nel campo, non solo nei dati: quello che si salva dev'essere quello che si
+    // vede, altrimenti il letto in pagina e il letto in archivio raccontano cose diverse.
+    if(pulito !== el.value){
+      el.value = pulito;
+      saveDraft();
+    }
+  });
+})();
+
 async function saveConsegna(){
   if(!sb){
     alert('Salvataggio non disponibile: manca la connessione al database. La consegna si può comunque copiare.');
     return;
   }
   const lettoInput = document.getElementById('letto-val');
-  const letto = lettoInput.value.trim();
+  const letto = normalizzaLetto(lettoInput.value);
   const testo = document.getElementById('output').value.trim();
   if(!letto){
     lettoInput.focus();
     return;
   }
+  // Salvando senza essere usciti dal campo il blur non è ancora scattato: si allinea qui.
+  lettoInput.value = letto;
   if(!testo) return;
   const eta = document.getElementById('eta-val').value.trim();
   const sesso = (state['sesso'] && state['sesso'][0]) || '';
@@ -2561,9 +2597,14 @@ async function saveConsegna(){
   // scritto prima) la si sovrascrive invece di affiancarle una seconda riga per lo stesso
   // letto. Fra eventuali doppioni già presenti in archivio si aggiorna il più recente.
   if(!res){
+    // Il confronto si fa sui letti normalizzati, non con un .eq() sul valore grezzo: le righe
+    // salvate prima di questa regola possono avere "03" dove oggi si scrive "3", e con il
+    // confronto esatto resterebbero irraggiungibili — accanto a loro nascerebbe una seconda
+    // riga per lo stesso letto, cioè proprio ciò che la normalizzazione serve a evitare.
+    // L'elenco è piccolo per costruzione (le consegne vecchie si cancellano da sole).
     const esistente = await sb.from('consegne_turno')
-      .select('id').eq('letto', letto).order('creato_il', { ascending: false }).limit(1);
-    const riga = !esistente.error && esistente.data && esistente.data[0];
+      .select('id,letto').order('creato_il', { ascending: false });
+    const riga = !esistente.error && (esistente.data || []).find(r => normalizzaLetto(r.letto) === letto);
     if(riga){
       res = await sb.from('consegne_turno').update(payload).eq('id', riga.id).select('id');
       if(!res.error && !(res.data && res.data.length)) res = null;
@@ -2666,6 +2707,46 @@ document.getElementById('saved-list').addEventListener('keydown', e => {
   card.click();
 });
 
+// ------------------------------------------------------- consegne che si cancellano da sole
+// Sono dati clinici di bambini: non devono restare in archivio per sempre. La copia che conta
+// è quella che si incolla nella cartella; questa serve a riaprire il letto nei giorni vicini,
+// e dopo un po' è solo roba che si accumula.
+//
+// La pulizia la fa l'app, non il database, ed è una scelta: il progetto Supabase è condiviso
+// con un altro sito, e un pg_cron (o una Edge Function) andrebbe acceso a livello di
+// progetto, cioè anche per loro. Da qui invece non si tocca niente di condiviso — si usano le
+// stesse policy di sempre, che a questi due account l'eliminazione già la concedono.
+// Il prezzo è che la pulizia avviene quando qualcuno apre l'app: in un reparto vuol dire ogni
+// turno, che per una scadenza di sedici giorni è più che abbastanza.
+const CONSERVAZIONE_MS = 16 * 24 * 60 * 60 * 1000;
+
+// L'ora la si chiede al server, mai al dispositivo. Se l'orologio di un computer del reparto
+// fosse avanti di un mese — succede, dopo un cambio di scheda madre o una batteria scarica —
+// una scadenza calcolata sul suo Date.now() cancellerebbe le consegne di oggi. Se il server
+// non risponde con un'ora, non si cancella niente: meglio una consegna di troppo in archivio
+// che una persa per un orologio sbagliato.
+async function oraDelServer(){
+  try {
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/consegne_turno?select=id&limit=1`,
+      { method: 'HEAD', headers: { apikey: SUPABASE_KEY } });
+    const t = Date.parse(r.headers.get('date') || '');
+    return isNaN(t) ? null : t;
+  } catch(e){
+    return null;
+  }
+}
+
+async function eliminaConsegneVecchie(){
+  if(!sb) return;
+  const adesso = await oraDelServer();
+  if(adesso === null) return;
+  // Il taglio lo applica il database sulla propria colonna: qui non si sceglie riga per riga
+  // che cosa cancellare, si dice solo fin dove.
+  const limite = new Date(adesso - CONSERVAZIONE_MS).toISOString();
+  const { error } = await sb.from('consegne_turno').delete().lt('creato_il', limite);
+  if(error) console.error('Pulizia delle consegne scadute non riuscita:', error);
+}
+
 async function loadSavedList(){
   const container = document.getElementById('saved-list');
   const section = document.getElementById('saved-section');
@@ -2761,7 +2842,9 @@ async function loadConsegna(id){
   // l'apertura della frase neurologica ("Bambino...", "Piccola..."): le consegne salvate
   // prima della colonna "inputs" hanno l'età solo qui, e senza questo ordine l'apertura
   // sparirebbe dal testo rigenerato.
-  document.getElementById('letto-val').value = item.letto || '';
+  // Il letto si mostra normalizzato: riaprendo una consegna vecchia scritta "03", al primo
+  // salvataggio la riga si allinea da sé alla forma di oggi invece di restare un caso a parte.
+  document.getElementById('letto-val').value = normalizzaLetto(item.letto);
   document.getElementById('eta-val').value = item.eta || '';
   if(hasState){
     if(item.stato.manualPieces) manualPieces = JSON.parse(JSON.stringify(item.stato.manualPieces));
@@ -2776,7 +2859,7 @@ async function loadConsegna(id){
   }
   // Da qui in poi "Salva" aggiorna questa consegna invece di crearne una copia.
   currentConsegnaId = item.id;
-  currentConsegnaLetto = (item.letto || '').trim();
+  currentConsegnaLetto = normalizzaLetto(item.letto);
   clearOutputHighlight();
   // La consegna appena aperta è da adesso il lavoro in corso: va nella bozza locale, così
   // sopravvive a un ricaricamento come tutto il resto. Serve anche per il ramo senza stato
@@ -2936,13 +3019,16 @@ function mostraAccesso(messaggio){
   campoCodice.focus();
 }
 
-function apriApp(){
+async function apriApp(){
   appAperta = true;
   bloccaContenuto(false);
   boxAccesso.classList.add('nascosto');
   msgAccesso.textContent = '';
   campoCodice.value = '';
   restoreDraft();
+  // Prima si toglie lo scaduto, poi si mostra l'elenco: al contrario comparirebbero per un
+  // istante consegne che stanno per sparire sotto gli occhi di chi guarda.
+  await eliminaConsegneVecchie();
   loadSavedList();
 }
 

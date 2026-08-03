@@ -109,6 +109,33 @@ where schemaname = 'public' and tablename <> 'consegne_turno';
 Se qualcuna dice `{authenticated}` con `qual` uguale a `true`, va ristretta anche lei ai suoi
 utenti, con lo stesso metodo usato qui.
 
+## Le consegne si cancellano da sole dopo 16 giorni
+
+Sono dati clinici di bambini e non devono restare in archivio per sempre. La copia che conta
+è quella che si incolla nella cartella: questa serve a riaprire il letto nei giorni vicini.
+
+**La pulizia la fa l'app, non il database, e non è una scorciatoia.** Un `pg_cron` (o una
+Edge Function programmata) andrebbe acceso a livello di **progetto**, e il progetto è
+condiviso con l'altro sito: sarebbe una modifica anche a casa loro, per un problema che è
+solo nostro. Dall'app invece non si tocca niente di condiviso — nessuna estensione, nessuna
+funzione, nessuna chiave in più. Si usa la policy di eliminazione che questi due account
+hanno già.
+
+Come funziona, in breve:
+
+- all'apertura dell'app, dopo l'accesso, parte una `delete` con il filtro
+  `creato_il < adesso - 16 giorni`. È il database a scegliere le righe, l'app dice solo fin dove;
+- `creato_il` è la data dell'**ultimo salvataggio**, quindi una consegna che si continua ad
+  aggiornare non scade mai finché la si usa;
+- l'ora viene chiesta al server (header `Date` della risposta REST), **mai** all'orologio del
+  dispositivo: un computer con la data avanti cancellerebbe le consegne di oggi. Se il server
+  non risponde con un'ora, non si cancella niente.
+
+Il prezzo è che la pulizia avviene solo quando qualcuno apre l'app. In un reparto vuol dire
+ogni turno, che per una scadenza di sedici giorni basta e avanza.
+
+Per cambiare la durata si tocca `CONSERVAZIONE_MS` in `index.html`, e nient'altro.
+
 ## La libreria Supabase sta nel repo
 
 `vendor/supabase-js-2.112.0.umd.js` è la libreria client, copiata qui invece di essere
