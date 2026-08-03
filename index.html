@@ -281,10 +281,20 @@
     font-weight:600;
     cursor:pointer;
     flex:1;
+    min-width:0;
   }
   button.copy{background:var(--ink);color:white;}
   button.save{background:var(--save);color:white;}
   button.reset{background:#EEF1F3;color:var(--ink);}
+  button.undo{background:#EEF1F3;color:var(--ink);}
+  /* Spento finche' non c'e' niente da annullare: cosi' dice da solo se un passo indietro
+     esiste, senza che si debba premerlo per scoprirlo. */
+  button.act:disabled{opacity:.4;cursor:default;}
+  /* Quattro tasti su una riga sola: sui telefoni stretti si stringono, non vanno a capo. */
+  @media (max-width:420px){
+    button.act{padding:6px 6px;font-size:.78rem;}
+    .actions{gap:6px;}
+  }
   .copied{color:var(--save);font-size:.82rem;margin-left:4px;align-self:center;}
 
   .saved-save-row{
@@ -990,6 +1000,7 @@
       <button class="act copy" onclick="copyOutput()">Copia</button>
       <button class="act save" onclick="saveConsegna()">Salva</button>
       <button class="act reset" onclick="resetAll()">Cancella</button>
+      <button class="act undo" id="undo-btn" type="button" disabled>Annulla</button>
       <span class="copied" id="copied-msg" style="display:none;">Copiato ✓</span>
       <span class="copied" id="saved-msg" style="display:none;">Salvata ✓</span>
     </div>
@@ -1300,6 +1311,10 @@ function enforceDigiunoExclusivity(groupName, flag){
 
 document.querySelectorAll('.flag').forEach(flag => {
   flag.addEventListener('click', () => {
+    // Un chip e' un'azione discreta: sempre un passo indietro a se'. Va fotografato qui,
+    // prima di toccare lo stato, perche' e' proprio da qui che si scioglie senza appello una
+    // frase riscritta a mano (unfreezePieceKeys, piu' in basso).
+    ricorda(null);
     const group = flag.closest('.group, .sub-flags, .inline-group, .mini-group');
     const groupName = group.dataset.group;
     const mode = group.dataset.mode;
@@ -1387,6 +1402,9 @@ document.querySelectorAll('.flag').forEach(flag => {
  'tor-asp-val','tor-qta-val','add-asp-val','add-qta-val','cra-asp-val','cra-qta-val','alt-asp-val','alt-qta-val'].forEach(id => {
   const el = document.getElementById(id);
   if(el) el.addEventListener('input', () => {
+    // Una foto per campo, non per tasto: l'id fa da fonte e le battute successive nello
+    // stesso campo si accodano a quella.
+    ricorda(id);
     highlightSource = id;
     highlightPiece = null;
     unfreezePieceKeys(pieceKeysForGroup(id));
@@ -2227,6 +2245,10 @@ function repartitionLine(line, newText){
 // Quando l'utente scrive a mano nella consegna, capiamo QUALE riga ha toccato confrontando
 // il testo con l'ultimo mostrato.
 document.getElementById('output').addEventListener('input', () => {
+  // Come per i campi: una foto per sessione di scrittura, non per tasto. Dentro la textarea
+  // il Ctrl+Z del browser continua a fare l'annulla carattere per carattere, quindi qui il
+  // passo grosso non toglie niente, lo affianca.
+  ricorda('output');
   const textarea = document.getElementById('output');
   const currentLines = textarea.value.split('\n');
   const known = lastRenderedLines;
@@ -2493,7 +2515,92 @@ function scrollFlagToFixedPosition(categoryEl){
   window.scrollBy(0, categoryEl.getBoundingClientRect().top - FLAG_SCROLL_OFFSET);
 }
 
+// ------------------------------------------------------------------------------- annulla
+// "Cancella" sta accanto a "Salva", largo uguale, e azzera tutto senza chiedere niente; e un
+// chip toccato di traverso scioglie la frase che si era riscritta a mano — comportamento
+// voluto, ma irreversibile. Mancava il passo indietro, non una conferma: le conferme si
+// imparano a ignorare in due giorni, un annulla no.
+//
+// Non serve una macchina nuova. Lo stato che conta sta gia' tutto in poche variabili, e la
+// bozza lo fotografa intero a ogni modifica: qui si tengono le ultime venti foto invece di
+// una sola, e si rientra dalla stessa porta da cui rientra la bozza (applyState + render).
+const ANNULLA_MAX = 20;
+let annullaStack = [];
+// Da quale campo veniva l'ultima foto. Digitando, l'evento parte a ogni tasto: senza questo
+// l'annulla tornerebbe indietro di un carattere per volta, che non e' un passo, e' un tic.
+// E' il campo che si e' cambiato, non il carattere.
+let annullaUltimaFonte = null;
+
+function istantanea(){
+  return {
+    groups: JSON.parse(JSON.stringify(state)),
+    inputs: collectInputs(),
+    manualPieces: JSON.parse(JSON.stringify(manualPieces)),
+    blockNotes: JSON.parse(JSON.stringify(blockNotes)),
+    sopite: JSON.parse(JSON.stringify(sottoCategorieSopite)),
+    consegnaId: currentConsegnaId,
+    consegnaLetto: currentConsegnaLetto
+  };
+}
+
+// 'fonte' distingue le modifiche continue (si scrive in un campo) da quelle discrete (un chip,
+// un azzeramento): due battute nello stesso campo non meritano due passi indietro. Le azioni
+// discrete passano null, e fanno sempre foto a se'.
+function ricorda(fonte){
+  if(fonte && fonte === annullaUltimaFonte) return;
+  annullaUltimaFonte = fonte || null;
+  annullaStack.push(istantanea());
+  if(annullaStack.length > ANNULLA_MAX) annullaStack.shift();
+  aggiornaTastoAnnulla();
+}
+
+function dimenticaTutto(){
+  annullaStack = [];
+  annullaUltimaFonte = null;
+  aggiornaTastoAnnulla();
+}
+
+function aggiornaTastoAnnulla(){
+  const b = document.getElementById('undo-btn');
+  if(b) b.disabled = annullaStack.length === 0;
+}
+
+function annulla(){
+  const s = annullaStack.pop();
+  if(!s) return;
+  // La prossima battuta in un campo dev'essere una foto nuova, non la continuazione di quella
+  // appena consumata.
+  annullaUltimaFonte = null;
+  applyState(s.groups, s.inputs);
+  manualPieces = s.manualPieces;
+  blockNotes = s.blockNotes;
+  // applyState azzera il ricordo delle sottocategorie chiuse: si rimette dopo, non prima.
+  sottoCategorieSopite = s.sopite;
+  currentConsegnaId = s.consegnaId;
+  currentConsegnaLetto = s.consegnaLetto;
+  lastRenderedLines = [];
+  highlightSource = null;
+  highlightPiece = null;
+  render();
+  clearOutputHighlight();
+  aggiornaTastoAnnulla();
+}
+
+document.getElementById('undo-btn').addEventListener('click', annulla);
+// Su una tastiera vera Ctrl+Z e' il gesto naturale. Dentro un campo di testo, pero', Ctrl+Z e'
+// l'annulla del browser sul testo che si sta scrivendo: li' si lascia fare a lui.
+document.addEventListener('keydown', e => {
+  if(!(e.ctrlKey || e.metaKey) || e.shiftKey || (e.key !== 'z' && e.key !== 'Z')) return;
+  const t = e.target;
+  if(t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return;
+  e.preventDefault();
+  annulla();
+});
+
 function resetAll(){
+  // Il passo indietro va fotografato prima di distruggere, altrimenti "Cancella" resta il
+  // tasto che non perdona.
+  ricorda(null);
   document.querySelectorAll('.flag').forEach(f => f.classList.remove('on'));
   document.querySelectorAll('.sub-flags').forEach(s => s.classList.remove('show'));
   document.querySelectorAll('.params-box').forEach(p => p.classList.remove('show'));
@@ -2826,6 +2933,11 @@ async function loadConsegna(id){
     console.error('Errore nel caricamento:', error);
     return;
   }
+  // Aprire una consegna dall'archivio sostituisce tutto quello che si aveva in pagina: se la
+  // card e' stata toccata per sbaglio, senza questo il lavoro in corso sarebbe perso. Si
+  // fotografa qui, a riga trovata, e non all'inizio: se la lettura fallisse non e' successo
+  // niente da annullare.
+  ricorda(null);
   highlightSource = null;
   highlightPiece = null;
   manualPieces = {};
@@ -3044,6 +3156,9 @@ async function esci(messaggio, pulisci){
   } catch(e){}
   appAperta = false;
   if(pulisci) resetAll();
+  // La cronologia dell'annulla non deve sopravvivere all'uscita: se no, chi arriva dopo al
+  // computer del reparto potrebbe riportare in pagina la consegna di chi c'era prima.
+  dimenticaTutto();
   if(sb){ try { await sb.auth.signOut(); } catch(e){} }
   document.getElementById('saved-list').innerHTML = '<p class="saved-empty">Caricamento...</p>';
   mostraAccesso(messaggio);
