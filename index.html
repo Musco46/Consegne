@@ -557,6 +557,7 @@
       <div class="flags">
         <span class="flag" data-text="secrezioni assenti">Assenti</span>
         <span class="flag" data-text="secrezioni scarse" data-sub="V-aspetto">Scarse</span>
+        <span class="flag" data-text="secrezioni modiche" data-sub="V-aspetto">Modiche</span>
         <span class="flag" data-text="secrezioni abbondanti" data-sub="V-aspetto">Abbondanti</span>
       </div>
       <div class="sub-flags" id="V-aspetto" data-group="V-aspetto-sel" data-mode="checkbox">
@@ -1673,7 +1674,7 @@ function render(){
   let vSecr = state['V-secrezioni'] && state['V-secrezioni'][0];
   if(vSecr){
     let secrBits = [];
-    if(vSecr === 'secrezioni scarse' || vSecr === 'secrezioni abbondanti'){
+    if(vSecr !== 'secrezioni assenti'){
       secrBits.push('bronco-aspirato al bisogno');
     }
     let vAspettoArr = state['V-aspetto-sel'] || [];
@@ -1687,10 +1688,11 @@ function render(){
       });
       aspettoTxt = joinItalian(ordered);
     }
-    // "scarse" non è un dato da passare: quel chip serve a dire che le secrezioni ci sono (e
-    // ad aprire l'aspetto), non a quantificarle. Quindi le secrezioni si nominano solo per
-    // dirne l'aspetto; se non c'è nemmeno quello resta il solo bronco-aspirato al bisogno.
-    if(vSecr === 'secrezioni scarse'){
+    // "scarse" e "modiche" non sono dati da passare: quei chip servono a dire che le secrezioni
+    // ci sono (e ad aprire l'aspetto), non a quantificarle. Quindi le secrezioni si nominano
+    // solo per dirne l'aspetto; se non c'è nemmeno quello resta il solo bronco-aspirato al
+    // bisogno.
+    if(vSecr === 'secrezioni scarse' || vSecr === 'secrezioni modiche'){
       if(aspettoTxt) secrBits.push('secrezioni ' + aspettoTxt);
     } else {
       secrBits.push(vSecr);
