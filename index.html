@@ -3,6 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!-- Il sito e' su GitHub Pages, quindi pubblicamente raggiungibile: almeno non deve
+     comparire nei motori di ricerca. Non e' una protezione (quella sta nelle policy di
+     Supabase), e' solo il non farsi trovare per caso. -->
+<meta name="robots" content="noindex, nofollow">
 <title>Consegne di turno</title>
 <style>
   :root{
@@ -396,15 +400,50 @@
     }
     .output-body .actions{flex-shrink:0;}
   }
+
+  /* Schermata di accesso. Nasce VISIBILE e viene tolta solo dopo l'autenticazione: se il
+     JavaScript non parte si resta fuori, invece di entrare per errore. */
+  .accesso{position:fixed;inset:0;z-index:100;background:var(--bg);display:flex;align-items:center;justify-content:center;padding:24px;}
+  .accesso.nascosto{display:none;}
+  .accesso-box{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:28px 24px;width:100%;max-width:340px;box-shadow:0 6px 24px rgba(27,36,48,.08);}
+  .accesso-box h1{margin:0 0 4px;font-size:1.15rem;color:var(--ink);}
+  .accesso-box .sottotitolo{margin:0 0 20px;font-size:.85rem;color:var(--sub);}
+  .accesso-box label{display:block;font-size:.8rem;color:var(--sub);margin-bottom:6px;}
+  .accesso-box input{width:100%;padding:11px 12px;font-size:1rem;font-family:inherit;border:1px solid var(--line);border-radius:9px;background:#fff;color:var(--ink);}
+  .accesso-box input:focus{outline:2px solid var(--n2);outline-offset:1px;border-color:var(--n2);}
+  .accesso-box button{width:100%;margin-top:14px;padding:11px;font-size:.95rem;font-family:inherit;font-weight:600;border:none;border-radius:9px;background:var(--ink);color:#fff;cursor:pointer;}
+  .accesso-box button:disabled{opacity:.55;cursor:default;}
+  .accesso-box .secondario{background:none;border:1px solid var(--line);color:var(--sub);font-weight:400;}
+  .accesso-errore{margin-top:12px;font-size:.83rem;color:var(--n3);min-height:1.15em;}
+  .esci{background:none;border:1px solid var(--line);border-radius:8px;color:var(--sub);font-size:.78rem;font-family:inherit;padding:5px 10px;cursor:pointer;}
+  .esci:hover{border-color:#A9B4BD;color:var(--ink);}
+  .esci:focus-visible{outline:2px solid var(--n2);outline-offset:2px;}
 </style>
 </head>
 <body>
+
+<div class="accesso" id="accesso">
+  <div class="accesso-box">
+    <h1>Consegne di turno</h1>
+    <p class="sottotitolo">Rianimazione &mdash; accesso riservato al personale</p>
+    <label for="accesso-codice">Codice reparto</label>
+    <!-- autocomplete="off": far ricordare il codice al browser annullerebbe il rientro a
+         ogni turno, che e' il motivo per cui il codice viene richiesto. -->
+    <input type="password" id="accesso-codice" autocomplete="off" enterkeyhint="go">
+    <button type="button" id="accesso-btn">Entra</button>
+    <div class="accesso-errore" id="accesso-errore" role="alert"></div>
+    <button type="button" class="secondario" id="accesso-locale" hidden>Continua senza archivio</button>
+  </div>
+</div>
 
 <div class="layout">
 <main>
 
   <section class="card" id="saved-section">
-    <h2 style="margin:0 0 12px;font-size:1.05rem;">Consegne salvate</h2>
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 12px;">
+      <h2 style="margin:0;font-size:1.05rem;">Consegne salvate</h2>
+      <button type="button" class="esci" id="esci-btn">Esci</button>
+    </div>
     <div id="saved-list"><p class="saved-empty">Caricamento...</p></div>
   </section>
 
@@ -959,7 +998,11 @@ let sb = null;
 try {
   sb = window.supabase.createClient(
     'https://kxqrtdlbqyhqaumvlafu.supabase.co',
-    'sb_publishable_3Twp4s3IEtLu5EOtJ4bW-g_J4xoSErd'
+    'sb_publishable_3Twp4s3IEtLu5EOtJ4bW-g_J4xoSErd',
+    // La sessione resta nel browser e si rinnova da sola, cosi' durante il turno non viene
+    // chiesto nulla nemmeno cambiando infermiere: e' la postazione a essere autenticata.
+    // A chiudere il turno ci pensa il controllo delle 12 ore piu' in basso.
+    { auth: { persistSession: true, autoRefreshToken: true, storageKey: 'consegne-sessione' } }
   );
 } catch(e){
   console.error('Supabase non disponibile: salvataggio ed elenco consegne disattivati.', e);
@@ -2703,10 +2746,14 @@ async function deleteConsegna(id){
 // consegna identica, esattamente come fa il caricamento di una consegna dall'archivio.
 // Nulla di tutto questo passa dalla rete: resta nel browser di chi sta compilando.
 const DRAFT_KEY = 'consegne-turno-bozza';
+// Durata di un turno. Governa due cose che devono restare allineate: quanto vive la bozza sul
+// dispositivo e quanto dura l'accesso della postazione. Se la copia locale sopravvivesse alla
+// sessione, dei dati clinici resterebbero sul computer dopo che l'accesso è già scaduto.
+const TURNO_MS = 12 * 60 * 60 * 1000;
 // Oltre questo tempo la bozza non è più "quella che stavo scrivendo" ma quella di un turno
 // passato, di un altro paziente: meglio ripartire puliti che ritrovarsi in pagina dati
 // vecchi da riconoscere e cancellare a mano.
-const DRAFT_MAX_AGE_MS = 16 * 60 * 60 * 1000;
+const DRAFT_MAX_AGE_MS = TURNO_MS;
 
 let draftSaveTimer = null;
 function saveDraft(){
@@ -2759,8 +2806,180 @@ function restoreDraft(){
   clearOutputHighlight();
 }
 
-restoreDraft();
-loadSavedList();
+// ------------------------------------------------------------- accesso di reparto
+// Si autentica il DISPOSITIVO, non la persona: i computer sono condivisi e rifare il login a
+// ogni cambio di infermiere sarebbe attrito puro. Gli account sono comuni a tutto il reparto,
+// quindi tutti vedono e possono eliminare tutte le consegne: è voluto.
+//
+// Il codice NON sta in questo file: è la password di quegli utenti su Supabase. La chiave
+// pubblicabile qui sopra è pubblica per progetto e non protegge niente; la protezione vera
+// sono le policy della tabella, che rispondono solo a "authenticated".
+// Due codici, gli stessi identici dati: cambia solo quanto dura l'accesso.
+//  - "reparto": la postazione condivisa, dove la sessione si chiude a fine turno perché quel
+//    computer lo usano tutti e nessuno lo custodisce;
+//  - "personale": il proprio telefono, dove l'accesso non scade — lì a fare la guardia c'è il
+//    blocco schermo del dispositivo, e richiedere il codice a ogni turno sarebbe solo noia.
+// Sono due utenti Supabase distinti con gli stessi permessi: la differenza vive tutta qui,
+// non nelle policy, che continuano a rispondere a chiunque sia autenticato.
+const PROFILI = [
+  { email: 'reparto@consegne.ria',   durata: TURNO_MS },
+  { email: 'personale@consegne.ria', durata: null }
+];
+const ACCESSO_INIZIO_KEY = 'consegne-accesso-il';
+const ACCESSO_DURATA_KEY = 'consegne-accesso-durata';
+const ACCESSO_EMAIL_KEY = 'consegne-accesso-email';
+
+const boxAccesso = document.getElementById('accesso');
+const campoCodice = document.getElementById('accesso-codice');
+const btnAccesso = document.getElementById('accesso-btn');
+const msgAccesso = document.getElementById('accesso-errore');
+// Vero solo mentre la consegna è visibile: distingue "sessione caduta mentre lavoravo" da
+// "pagina appena aperta senza sessione", che non è un errore e non va segnalato come tale.
+let appAperta = false;
+
+function accessoScaduto(){
+  let inizio = 0, grezzo = null;
+  try {
+    inizio = Number(localStorage.getItem(ACCESSO_INIZIO_KEY)) || 0;
+    grezzo = localStorage.getItem(ACCESSO_DURATA_KEY);
+  } catch(e){}
+  if(!inizio) return true;
+  if(grezzo === 'illimitata') return false;
+  // Nel dubbio si scade: una durata mancante o illeggibile vale come turno, mai come
+  // accesso perenne, altrimenti basterebbe cancellare una chiave per non uscire mai.
+  const durata = Number(grezzo) || TURNO_MS;
+  return Date.now() - inizio > durata;
+}
+
+function mostraAccesso(messaggio){
+  appAperta = false;
+  boxAccesso.classList.remove('nascosto');
+  msgAccesso.textContent = messaggio || '';
+  campoCodice.value = '';
+  campoCodice.focus();
+}
+
+function apriApp(){
+  appAperta = true;
+  boxAccesso.classList.add('nascosto');
+  msgAccesso.textContent = '';
+  campoCodice.value = '';
+  restoreDraft();
+  loadSavedList();
+}
+
+// 'pulisci' distingue le due uscite: a fine turno la consegna in corso va conservata (la
+// schermata di accesso la copre e la bozza la ritrova al rientro), mentre premendo "Esci" si
+// sta consegnando il computer a qualcun altro e non deve restare niente in pagina.
+async function esci(messaggio, pulisci){
+  // Si tiene solo quale profilo era in uso: non è un segreto ed è ciò che rende immediato il
+  // rientro sullo stesso dispositivo. Inizio e durata se ne vanno, quindi l'accesso è chiuso.
+  try {
+    localStorage.removeItem(ACCESSO_INIZIO_KEY);
+    localStorage.removeItem(ACCESSO_DURATA_KEY);
+  } catch(e){}
+  appAperta = false;
+  if(pulisci) resetAll();
+  if(sb){ try { await sb.auth.signOut(); } catch(e){} }
+  document.getElementById('saved-list').innerHTML = '<p class="saved-empty">Caricamento...</p>';
+  mostraAccesso(messaggio);
+}
+
+async function entra(){
+  const codice = campoCodice.value.trim();
+  if(!codice || !sb) return;
+  btnAccesso.disabled = true;
+  msgAccesso.textContent = '';
+
+  // Il codice digitato non dice a quale dei due profili appartenga: si prova. Per non fare
+  // due richieste ogni volta si parte da quello che ha già funzionato su questo dispositivo —
+  // sul computer del reparto sarà sempre quello condiviso, sul telefono quello personale —
+  // così a regime la richiesta resta una sola.
+  let ultimo = null;
+  try { ultimo = localStorage.getItem(ACCESSO_EMAIL_KEY); } catch(e){}
+  const ordine = PROFILI.slice().sort((a, b) => (b.email === ultimo) - (a.email === ultimo));
+
+  let entrato = null, errore = null;
+  for(const profilo of ordine){
+    try {
+      const esito = await sb.auth.signInWithPassword({ email: profilo.email, password: codice });
+      if(!esito.error){ entrato = profilo; break; }
+      errore = esito.error;
+    } catch(e){
+      errore = e;
+    }
+  }
+
+  btnAccesso.disabled = false;
+  if(!entrato){
+    // Nessun dettaglio sul perché, e nemmeno quale dei due codici fosse quasi giusto: a chi
+    // sta tentando non si dice quanto è andato vicino. Il dettaglio resta in console, per chi
+    // deve capire un guasto.
+    console.error('Accesso non riuscito:', errore);
+    mostraAccesso('Codice non valido.');
+    return;
+  }
+  try {
+    localStorage.setItem(ACCESSO_INIZIO_KEY, String(Date.now()));
+    localStorage.setItem(ACCESSO_DURATA_KEY, entrato.durata === null ? 'illimitata' : String(entrato.durata));
+    localStorage.setItem(ACCESSO_EMAIL_KEY, entrato.email);
+  } catch(e){}
+  apriApp();
+}
+
+btnAccesso.addEventListener('click', entra);
+campoCodice.addEventListener('keydown', e => {
+  if(e.key === 'Enter'){ e.preventDefault(); entra(); }
+});
+document.getElementById('esci-btn').addEventListener('click', () => esci('', true));
+
+// Il turno può finire mentre la pagina è aperta e nessuno la ricarica per ore: senza questo
+// controllo la sessione scadrebbe solo alla successiva operazione sull'archivio.
+setInterval(() => {
+  if(appAperta && accessoScaduto()) esci('Turno terminato, reinserisci il codice.', false);
+}, 60000);
+
+// Se è Supabase a invalidare la sessione (codice cambiato, token non più rinnovabile) non
+// deve sembrare che l'archivio sia semplicemente vuoto.
+if(sb){
+  sb.auth.onAuthStateChange((_evento, sessione) => {
+    if(!sessione && appAperta) esci('Sessione scaduta, reinserisci il codice.', false);
+  });
+}
+
+async function avvia(){
+  if(!sb){
+    // Senza il client Supabase non si può autenticare nessuno, ma nemmeno leggere niente:
+    // tutte le consegne stanno nell'archivio, irraggiungibile allo stesso modo. Si può quindi
+    // offrire la sola generazione locale senza esporre dati. La bozza però NON si ripristina:
+    // quella è sul dispositivo e sarebbe l'unica cosa clinica visibile senza codice.
+    msgAccesso.textContent = 'Archivio non raggiungibile: si può solo scrivere una consegna nuova.';
+    document.getElementById('accesso-locale').hidden = false;
+    return;
+  }
+  let sessione = null;
+  try {
+    const { data } = await sb.auth.getSession();
+    sessione = data.session;
+  } catch(e){
+    console.error('Sessione non leggibile:', e);
+  }
+  if(sessione && !accessoScaduto()){ apriApp(); return; }
+  if(sessione){
+    try { await sb.auth.signOut(); } catch(e){}
+    mostraAccesso('Turno terminato, reinserisci il codice.');
+    return;
+  }
+  mostraAccesso('');
+}
+
+document.getElementById('accesso-locale').addEventListener('click', () => {
+  boxAccesso.classList.add('nascosto');
+  document.getElementById('saved-list').innerHTML =
+    '<p class="saved-empty">Archivio non raggiungibile.</p>';
+});
+
+avvia();
 </script>
 
 </body>
