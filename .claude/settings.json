@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/Users/Musco/Desktop/Progetti App/**)",
+      "Read(//c/Users/Musco/Desktop/Progetti App/RIA - Test Calcoli Farmaci/public/**)",
+      "Read(//c/Users/Musco/.claude/projects/C--Users-Musco/memory/**)",
+      "Read(//c/GsersMusco/Desktop/Progetti App/RIA - Consegne/**)",
+      "mcp__claude_ai_Supabase__execute_sql",
+      "mcp__claude_ai_Supabase__get_advisors",
+      "mcp__claude_ai_Vercel__list_teams",
+      "mcp__claude_ai_Vercel__list_projects",
+      "mcp__claude_ai_Vercel__get_project"
+    ],
+    "additionalDirectories": [
+      "C:\\Users\\Musco\\.claude\\projects\\C--Users-Musco\\memory"
+    ]
+  }
+}
