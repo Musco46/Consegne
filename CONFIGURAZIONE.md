@@ -1,8 +1,8 @@
 # Configurazione dell'accesso
 
-Il sito è pubblico (GitHub Pages) e la chiave Supabase che sta in `index.html` è **pubblicabile
-per progetto**: non è un segreto e non protegge nulla. La protezione sono le policy della
-tabella, che devono rispondere solo a chi è autenticato.
+Il sito è pubblico (Vercel, `consegneria.vercel.app`) e la chiave Supabase che sta in
+`index.html` è **pubblicabile per progetto**: non è un segreto e non protegge nulla. La
+protezione sono le policy della tabella, che devono rispondere solo a chi è autenticato.
 
 Finché i passaggi qui sotto non sono fatti, il sito mostra la schermata del codice e non
 lascia entrare nessuno.
@@ -33,19 +33,23 @@ entrare. Senza questo, tutto il resto non serve a niente.
 
 ## 3. Le policy della tabella
 
-Prima si guarda cosa c'è adesso:
-
-```sql
-select policyname, cmd, roles, qual, with_check
-from pg_policies
-where schemaname = 'public' and tablename = 'consegne_turno';
-```
-
-Vanno eliminate tutte quelle che nominano `anon` o `public`, e sostituite con queste quattro
-(tutto il personale vede e può eliminare tutto — è voluto):
+SQL Editor → incollare **tutto questo** ed eseguire. Toglie da solo le policy esistenti,
+qualunque nome abbiano, e mette le quattro nuove (tutto il personale vede e può eliminare
+tutto — è voluto):
 
 ```sql
 alter table public.consegne_turno enable row level security;
+
+-- via le policy attuali, che rispondono anche a chi non ha fatto l'accesso
+do $$
+declare p record;
+begin
+  for p in select policyname from pg_policies
+           where schemaname = 'public' and tablename = 'consegne_turno'
+  loop
+    execute format('drop policy %I on public.consegne_turno', p.policyname);
+  end loop;
+end $$;
 
 create policy "personale: lettura" on public.consegne_turno
   for select to authenticated using (true);
