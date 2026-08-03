@@ -1045,6 +1045,13 @@ let blockNotes = [];     // [{ after: sectionKey | '_end' | null, text }]
 // coordinate che puntavano a una stringa non più esistente.
 let lastRenderedLines = []; // [{ sectionKey, noteIndex, segs:[{keys,text,manual}], seps:[], text }]
 
+// Cosa era selezionato in una sottocategoria che si è richiusa. Lo stato "vivo" va comunque
+// svuotato, altrimenti la consegna descriverebbe l'aspetto di secrezioni appena dichiarate
+// assenti; ma la scelta non va persa. Chi passa da "abbondanti" ad "assenti" e poi ci
+// ripensa si aspetta di ritrovare "biancastre" dov'era, non di doverlo ricliccare — come già
+// succede per i valori numerici dei pannelli, che restano scritti.
+let sottoCategorieSopite = {};   // nome del gruppo -> [testi dei chip]
+
 // Quale accesso enterale ha nominato il chip appena cliccato. Serve sia a scongelare sia a
 // evidenziare solo quell'accesso, quindi sta qui e non dentro un singolo gestore.
 const ACCESSO_PIECE_BY_TEXT = { 'tramite SNG': 'U-sng', 'tramite gastrostomia': 'U-gastro', 'tramite sondino NAVA': 'U-nava' };
@@ -1188,6 +1195,41 @@ function refreshFlagAria(){
 }
 refreshFlagAria();
 
+// I gruppi di stato che vivono dentro un pannello di sottocategoria: il pannello stesso, se
+// ne dichiara uno, più gli eventuali gruppi annidati (i mini-gruppi delle azioni).
+function gruppiDelPannello(subEl){
+  const els = [];
+  if(subEl.dataset.group) els.push(subEl);
+  subEl.querySelectorAll('[data-group]').forEach(el => els.push(el));
+  return els;
+}
+
+// La sottocategoria si chiude: lo stato esce di scena ma viene messo da parte.
+function sopisciSottoCategoria(subEl){
+  gruppiDelPannello(subEl).forEach(el => {
+    const g = el.dataset.group;
+    if(state[g] && state[g].length) sottoCategorieSopite[g] = state[g].slice();
+    state[g] = [];
+  });
+  subEl.querySelectorAll('.flag').forEach(f => f.classList.remove('on'));
+}
+
+// La sottocategoria si riapre: torna com'era stata lasciata.
+function risvegliaSottoCategoria(subEl){
+  gruppiDelPannello(subEl).forEach(el => {
+    const g = el.dataset.group;
+    const ricordo = sottoCategorieSopite[g];
+    if(!ricordo || !ricordo.length) return;
+    state[g] = ricordo.slice();
+    delete sottoCategorieSopite[g];
+    // Stesso filtro usato dal gestore dei clic: i chip di un gruppo annidato appartengono a
+    // quello, non al pannello che li contiene.
+    [...el.querySelectorAll('.flag')]
+      .filter(f => f.closest('.group, .sub-flags, .inline-group, .mini-group') === el)
+      .forEach(f => f.classList.toggle('on', state[g].includes(f.dataset.text)));
+  });
+}
+
 // Invio e Spazio devono attivare il chip come il clic. Lo Spazio va fermato, altrimenti
 // oltre a selezionare fa anche scorrere la pagina, che qui si sposta già da sola.
 document.addEventListener('keydown', e => {
@@ -1274,15 +1316,15 @@ document.querySelectorAll('.flag').forEach(flag => {
         const subEl = document.getElementById(subId);
         if(!subEl) return;
         const anyOn = [...group.querySelectorAll('.flag[data-sub]')].some(f => f.dataset.sub.split(' ').includes(subId) && f.classList.contains('on'));
+        const eraVisibile = subEl.classList.contains('show');
         if(anyOn){
           subEl.classList.add('show');
-        } else if(subEl.classList.contains('show')){
+          // Solo alla riapertura: se fosse a ogni clic, riaccenderebbe i chip che si sta
+          // cercando di spegnere mentre la sottocategoria è aperta.
+          if(!eraVisibile) risvegliaSottoCategoria(subEl);
+        } else if(eraVisibile){
           subEl.classList.remove('show');
-          if(subEl.dataset.group) state[subEl.dataset.group] = [];
-          subEl.querySelectorAll('[data-group]').forEach(el => {
-            if(el.dataset.group) state[el.dataset.group] = [];
-          });
-          subEl.querySelectorAll('.flag').forEach(f => f.classList.remove('on'));
+          sopisciSottoCategoria(subEl);
         }
       });
     }
@@ -1688,11 +1730,13 @@ function render(){
       });
       aspettoTxt = joinItalian(ordered);
     }
-    // "scarse" e "modiche" non sono dati da passare: quei chip servono a dire che le secrezioni
-    // ci sono (e ad aprire l'aspetto), non a quantificarle. Quindi le secrezioni si nominano
-    // solo per dirne l'aspetto; se non c'è nemmeno quello resta il solo bronco-aspirato al
-    // bisogno.
-    if(vSecr === 'secrezioni scarse' || vSecr === 'secrezioni modiche'){
+    // "modiche" vuol dire quantità normale, che è il sottinteso di chiunque legga: scriverlo
+    // aggiungerebbe una parola senza aggiungere un'informazione. Quel chip serve a dire che
+    // le secrezioni ci sono e ad aprire l'aspetto, non a quantificarle, quindi le secrezioni
+    // si nominano solo per dirne l'aspetto; se non c'è nemmeno quello resta il solo
+    // bronco-aspirato al bisogno. "Scarse" e "abbondanti" invece scostano dalla norma, e
+    // vanno dette.
+    if(vSecr === 'secrezioni modiche'){
       if(aspettoTxt) secrBits.push('secrezioni ' + aspettoTxt);
     } else {
       secrBits.push(vSecr);
@@ -2445,6 +2489,7 @@ function resetAll(){
   manualPieces = {};
   blockNotes = [];
   lastRenderedLines = [];
+  sottoCategorieSopite = {};
   highlightSource = null;
   highlightPiece = null;
   currentConsegnaId = null;
@@ -2545,6 +2590,9 @@ function applyState(savedState, savedInputs){
   document.querySelectorAll('.params-box').forEach(p => p.classList.remove('show'));
   valueInputs().forEach(i => i.value = '');
   for(const k in state) state[k] = [];
+  // Il ricordo delle sottocategorie chiuse appartiene al paziente che si stava scrivendo:
+  // caricandone un altro non deve riaffiorare l'aspetto delle sue secrezioni.
+  sottoCategorieSopite = {};
 
   // restore state object
   if(savedState){
@@ -2768,6 +2816,7 @@ function saveDraft(){
         groups: state,
         manualPieces,
         blockNotes,
+        sottoCategorieSopite,
         inputs: collectInputs(),
         consegnaId: currentConsegnaId,
         consegnaLetto: currentConsegnaLetto
@@ -2799,6 +2848,8 @@ function restoreDraft(){
   applyState(draft.groups, draft.inputs);
   manualPieces = draft.manualPieces || {};
   blockNotes = draft.blockNotes || [];
+  // Dopo applyState, che lo azzera.
+  sottoCategorieSopite = draft.sottoCategorieSopite || {};
   lastRenderedLines = [];
   // Se la bozza veniva da una consegna aperta dall'archivio, "Salva" deve continuare ad
   // aggiornare quella invece di affiancarle una copia.
