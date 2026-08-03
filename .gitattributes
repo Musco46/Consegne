@@ -1,0 +1,5 @@
+# La libreria in vendor/ si verifica con un hash (v. CONFIGURAZIONE.md). Su Windows Git
+# convertirebbe i fine riga al primo checkout, e il file su disco smetterebbe di
+# corrispondere a quello pubblicato da npm: la verifica fallirebbe senza che sia successo
+# niente. Qui si dice a Git di lasciarlo esattamente com'e'.
+vendor/** -text
