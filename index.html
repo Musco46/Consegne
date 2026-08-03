@@ -3,9 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<!-- Il sito e' su GitHub Pages, quindi pubblicamente raggiungibile: almeno non deve
-     comparire nei motori di ricerca. Non e' una protezione (quella sta nelle policy di
-     Supabase), e' solo il non farsi trovare per caso. -->
+<!-- Il sito sta su Vercel, quindi e' pubblicamente raggiungibile: almeno non deve comparire
+     nei motori di ricerca. Non e' una protezione (quella sta nelle policy di Supabase), e'
+     solo il non farsi trovare per caso. -->
 <meta name="robots" content="noindex, nofollow">
 <title>Consegne di turno</title>
 <style>
@@ -415,6 +415,12 @@
   .accesso-box button:disabled{opacity:.55;cursor:default;}
   .accesso-box .secondario{background:none;border:1px solid var(--line);color:var(--sub);font-weight:400;}
   .accesso-errore{margin-top:12px;font-size:.83rem;color:var(--n3);min-height:1.15em;}
+  /* Il tasto per uscire sta su una riga propria, fuori dalle schede: dentro "Consegne
+     salvate" spariva insieme a quella sezione quando l'archivio era vuoto, e a quel punto
+     dal turno non si usciva piu'. Non e' una scheda, quindi niente sfondo ne' cornice. */
+  .barra-sessione{display:flex;justify-content:flex-end;margin-bottom:-6px;}
+  /* il display qui sopra e' piu' forte del display:none che il browser da' a [hidden] */
+  .barra-sessione[hidden]{display:none;}
   .esci{background:none;border:1px solid var(--line);border-radius:8px;color:var(--sub);font-size:.78rem;font-family:inherit;padding:5px 10px;cursor:pointer;}
   .esci:hover{border-color:#A9B4BD;color:var(--ink);}
   .esci:focus-visible{outline:2px solid var(--n2);outline-offset:2px;}
@@ -439,11 +445,12 @@
 <div class="layout">
 <main>
 
+  <div class="barra-sessione" id="barra-sessione">
+    <button type="button" class="esci" id="esci-btn">Esci</button>
+  </div>
+
   <section class="card" id="saved-section">
-    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 12px;">
-      <h2 style="margin:0;font-size:1.05rem;">Consegne salvate</h2>
-      <button type="button" class="esci" id="esci-btn">Esci</button>
-    </div>
+    <h2 style="margin:0 0 12px;font-size:1.05rem;">Consegne salvate</h2>
     <div id="saved-list"><p class="saved-empty">Caricamento...</p></div>
   </section>
 
@@ -1168,12 +1175,16 @@ document.querySelectorAll('input, textarea:not(#output)').forEach(el => {
   });
 });
 
-// Tutti i campi compilabili. Le vecchie query elencavano "number, text, search" perché i
-// campi cambiano tipo (vedi hardening qui sopra): un elenco di tipi da tenere aggiornato a
-// mano è solo un modo per dimenticarsene: qui si prendono tutti gli <input> e basta (la
-// textarea della consegna non è un input, quindi resta fuori come deve).
+// Tutti i campi compilabili del modulo. Le vecchie query elencavano "number, text, search"
+// perché i campi cambiano tipo (vedi hardening qui sopra): un elenco di tipi da tenere
+// aggiornato a mano è solo un modo per dimenticarsene, qui si prendono tutti gli <input> e
+// basta (la textarea della consegna non è un input, quindi resta fuori come deve).
+// Il perimetro è <main>, non la pagina: la schermata di accesso non fa parte del modulo, e
+// il suo campo è un <input> con un id come tutti gli altri. Senza questo confine il codice
+// di reparto finirebbe nella bozza in localStorage e nella colonna "inputs" dell'archivio,
+// visto che collectInputs raccoglie ogni input che abbia un id.
 function valueInputs(){
-  return document.querySelectorAll('input');
+  return document.querySelectorAll('main input');
 }
 
 // I chip sono <span>: senza questo non si raggiungono col tab e uno screen reader non li
@@ -1497,17 +1508,17 @@ function updateVentParamsVisibility(){
   });
 }
 
-// I presidi della sezione Attività: ognuno ha la propria frase (pieceKey) e il proprio stato
-// (medicato / posizionato / rimosso). 'femminile' serve alla concordanza dello stato, che
-// I presidi della sezione Attività: 'stato' è il gruppo della sua sottocategoria (medicato /
-// posizionato / rimosso / cambio linea, a scelta multipla). Il cambio linea ce l'hanno solo
-// i presidi che una linea ce l'hanno (CVC, CVP, arteria).
-const PRESIDIO_CONFIG = {
-  'CVC':             { label: 'CVC',             stato: 'T-cvc-stato' },
-  'CVP':             { label: 'CVP',             stato: 'T-cvp-stato' },
-  'linea arteriosa': { label: 'linea arteriosa', stato: 'T-arteria-stato' },
-  'tracheostomia':   { label: 'tracheostomia',   stato: 'T-tracheo-stato' },
-  'gastrostomia':    { label: 'gastrostomia',    stato: 'T-gastro-stato' }
+// I presidi della sezione Attività, ognuno con il gruppo della propria sottocategoria
+// (medicato / posizionato / rimosso / cambio linea, a scelta multipla). Il cambio linea ce
+// l'hanno solo i presidi che una linea ce l'hanno (CVC, CVP, arteria).
+// Il nome con cui il presidio compare nel testo è la chiave stessa: è il data-text del chip,
+// già scritto come va detto nella consegna.
+const PRESIDIO_STATO = {
+  'CVC':             'T-cvc-stato',
+  'CVP':             'T-cvp-stato',
+  'linea arteriosa': 'T-arteria-stato',
+  'tracheostomia':   'T-tracheo-stato',
+  'gastrostomia':    'T-gastro-stato'
 };
 
 // Le frasi dei presidi si raggruppano per AZIONE, non per presidio: "eseguita medicazione di
@@ -1534,7 +1545,7 @@ const AZIONE_DRENAGGIO_PIECE_BY_STATO = {};
 AZIONI_DRENAGGI.forEach(a => { AZIONE_DRENAGGIO_PIECE_BY_STATO[a.stato] = a.pieceKey; });
 
 const PRESIDIO_PIECE_KEYS = AZIONI_PRESIDI.map(a => a.pieceKey);
-const PRESIDIO_STATO_GROUPS = Object.keys(PRESIDIO_CONFIG).map(k => PRESIDIO_CONFIG[k].stato);
+const PRESIDIO_STATO_GROUPS = Object.keys(PRESIDIO_STATO).map(k => PRESIDIO_STATO[k]);
 const AZIONE_PIECE_BY_STATO = {};
 AZIONI_PRESIDI.forEach(a => { AZIONE_PIECE_BY_STATO[a.stato] = a.pieceKey; });
 
@@ -1967,8 +1978,7 @@ function render(){
   // presidio non è un'attività (è la sottocategoria a dire che cosa ci è stato fatto).
   AZIONI_PRESIDI.forEach(az => {
     const labels = (state['T-presidi'] || [])
-      .filter(v => PRESIDIO_CONFIG[v] && (state[PRESIDIO_CONFIG[v].stato] || []).includes(az.stato))
-      .map(v => PRESIDIO_CONFIG[v].label);
+      .filter(v => PRESIDIO_STATO[v] && (state[PRESIDIO_STATO[v]] || []).includes(az.stato));
     if(!labels.length) return;
     const isSource = sourceMatches('T-presidi', ...PRESIDIO_STATO_GROUPS) && pieceMatches(az.pieceKey);
     tParts.push({ pieceKey: az.pieceKey, text: mark(isSource, `${az.frase} ${joinItalian(labels)}`) });
@@ -2371,7 +2381,13 @@ function clearOutputHighlight(){
 }
 
 
-function scrollAndHighlightRange(textarea, start, end){
+// Una <textarea> non dice dove cadano i propri caratteri: l'unico modo di saperlo è
+// ricostruire lo stesso testo, con lo stesso font e la stessa larghezza, in un <div> fuori
+// schermo, isolando in uno <span> il tratto che interessa. Lo costruiscono in due (lo scroll
+// e il disegno dei riquadri) e devono farlo IDENTICO, altrimenti misurano posizioni diverse
+// per lo stesso tratto: sta qui una volta sola. Chi lo chiama legge quello che gli serve e
+// poi rimuove il div.
+function buildOutputMirror(textarea, start, end){
   const value = textarea.value;
   const mirror = document.createElement('div');
   const cs = getComputedStyle(textarea);
@@ -2388,13 +2404,18 @@ function scrollAndHighlightRange(textarea, start, end){
 
   mirror.appendChild(document.createTextNode(value.slice(0, start)));
   const span = document.createElement('span');
+  // uno span vuoto non ha né posizione né altezza: lo spazio a larghezza zero gliene dà una
   span.textContent = value.slice(start, end) || '​';
   mirror.appendChild(span);
   mirror.appendChild(document.createTextNode(value.slice(start + span.textContent.length)));
+  return { mirror, span, cs };
+}
 
+function scrollAndHighlightRange(textarea, start, end){
+  const { mirror, span, cs } = buildOutputMirror(textarea, start, end);
   const markerTop = span.offsetTop;
   const markerHeight = span.offsetHeight || parseFloat(cs.lineHeight) || 20;
-  document.body.removeChild(mirror);
+  mirror.remove();
 
   const maxScroll = Math.max(0, textarea.scrollHeight - textarea.clientHeight);
   const target = markerTop - (textarea.clientHeight / 2) + (markerHeight / 2);
@@ -2413,33 +2434,14 @@ function rebuildHighlightRects(){
   lastHighlightRects = [];
   if(!currentHighlightRange) return;
   const { start, end } = currentHighlightRange;
-  const value = textarea.value;
-  if(end > value.length) return;
+  if(end > textarea.value.length) return;
 
-  const mirror = document.createElement('div');
-  const cs = getComputedStyle(textarea);
-  ['fontFamily','fontSize','fontWeight','fontStyle','lineHeight','letterSpacing','padding','borderWidth','boxSizing','wordBreak'].forEach(p => { mirror.style[p] = cs[p]; });
-  mirror.style.whiteSpace = 'pre-wrap';
-  mirror.style.wordWrap = 'break-word';
-  mirror.style.position = 'absolute';
-  mirror.style.visibility = 'hidden';
-  mirror.style.height = 'auto';
-  mirror.style.width = textarea.clientWidth + 'px';
-  mirror.style.left = '-9999px';
-  mirror.style.top = '0';
-  document.body.appendChild(mirror);
-
-  mirror.appendChild(document.createTextNode(value.slice(0, start)));
-  const span = document.createElement('span');
-  span.textContent = value.slice(start, end) || '​';
-  mirror.appendChild(span);
-  mirror.appendChild(document.createTextNode(value.slice(start + span.textContent.length)));
-
+  const { mirror, span } = buildOutputMirror(textarea, start, end);
   const mirrorRect = mirror.getBoundingClientRect();
   const range = document.createRange();
   range.selectNodeContents(span);
   const rects = Array.from(range.getClientRects());
-  document.body.removeChild(mirror);
+  mirror.remove();
 
   rects.forEach(r => {
     const top = r.top - mirrorRect.top;
@@ -2607,8 +2609,8 @@ function applyState(savedState, savedInputs){
     // le consegne salvate allora diventano l'elenco di oggi, tutti "medicato", che è quello
     // che quella categoria voleva dire.
     if(state['T-medicazione-dispositivi'] && state['T-medicazione-dispositivi'].length && !(state['T-presidi'] || []).length){
-      state['T-presidi'] = state['T-medicazione-dispositivi'].filter(v => PRESIDIO_CONFIG[v]);
-      state['T-presidi'].forEach(v => { state[PRESIDIO_CONFIG[v].stato] = ['medicato']; });
+      state['T-presidi'] = state['T-medicazione-dispositivi'].filter(v => PRESIDIO_STATO[v]);
+      state['T-presidi'].forEach(v => { state[PRESIDIO_STATO[v]] = ['medicato']; });
     }
   }
   // restore text inputs
@@ -2866,14 +2868,16 @@ function restoreDraft(){
 //
 // Il codice NON sta in questo file: è la password di quegli utenti su Supabase. La chiave
 // pubblicabile qui sopra è pubblica per progetto e non protegge niente; la protezione vera
-// sono le policy della tabella, che rispondono solo a "authenticated".
+// sono le policy della tabella, che rispondono SOLO a questi due indirizzi e non a un
+// generico utente autenticato: il progetto Supabase è condiviso con un altro sito, dove gli
+// utenti si registrano da sé, e "authenticated" comprenderebbe anche loro (v. CONFIGURAZIONE.md).
 // Due codici, gli stessi identici dati: cambia solo quanto dura l'accesso.
 //  - "reparto": la postazione condivisa, dove la sessione si chiude a fine turno perché quel
 //    computer lo usano tutti e nessuno lo custodisce;
 //  - "personale": il proprio telefono, dove l'accesso non scade — lì a fare la guardia c'è il
 //    blocco schermo del dispositivo, e richiedere il codice a ogni turno sarebbe solo noia.
 // Sono due utenti Supabase distinti con gli stessi permessi: la differenza vive tutta qui,
-// non nelle policy, che continuano a rispondere a chiunque sia autenticato.
+// nell'app, perché le policy trattano i due indirizzi esattamente allo stesso modo.
 const PROFILI = [
   { email: 'reparto@consegne.ria',   durata: TURNO_MS },
   { email: 'personale@consegne.ria', durata: null }
@@ -2889,6 +2893,17 @@ const msgAccesso = document.getElementById('accesso-errore');
 // Vero solo mentre la consegna è visibile: distingue "sessione caduta mentre lavoravo" da
 // "pagina appena aperta senza sessione", che non è un errore e non va segnalato come tale.
 let appAperta = false;
+
+// La schermata di accesso copre la pagina, ma non la toglie dal documento. A fine turno la
+// consegna in corso resta di proposito compilata sotto (si riprende rientrando col codice):
+// senza 'inert' resterebbe raggiungibile col tab, selezionabile e leggibile da uno screen
+// reader, cioè esattamente quello che richiedere di nuovo il codice dovrebbe impedire su un
+// computer che nel frattempo usa qualcun altro.
+const contenutoApp = document.querySelector('.layout');
+function bloccaContenuto(bloccato){
+  if(contenutoApp) contenutoApp.inert = bloccato;
+}
+bloccaContenuto(true);
 
 function accessoScaduto(){
   let inizio = 0, grezzo = null;
@@ -2906,6 +2921,7 @@ function accessoScaduto(){
 
 function mostraAccesso(messaggio){
   appAperta = false;
+  bloccaContenuto(true);
   boxAccesso.classList.remove('nascosto');
   msgAccesso.textContent = messaggio || '';
   campoCodice.value = '';
@@ -2914,6 +2930,7 @@ function mostraAccesso(messaggio){
 
 function apriApp(){
   appAperta = true;
+  bloccaContenuto(false);
   boxAccesso.classList.add('nascosto');
   msgAccesso.textContent = '';
   campoCodice.value = '';
@@ -3027,7 +3044,11 @@ async function avvia(){
 }
 
 document.getElementById('accesso-locale').addEventListener('click', () => {
+  bloccaContenuto(false);
   boxAccesso.classList.add('nascosto');
+  // Nessuna sessione da chiudere: qui non si è entrati da nessuna parte, e un tasto "Esci"
+  // che non esce da niente si limiterebbe a rimettere davanti un codice che non serve.
+  document.getElementById('barra-sessione').hidden = true;
   document.getElementById('saved-list').innerHTML =
     '<p class="saved-empty">Archivio non raggiungibile.</p>';
 });
