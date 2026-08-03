@@ -109,6 +109,46 @@ where schemaname = 'public' and tablename <> 'consegne_turno';
 Se qualcuna dice `{authenticated}` con `qual` uguale a `true`, va ristretta anche lei ai suoi
 utenti, con lo stesso metodo usato qui.
 
+## La libreria Supabase sta nel repo
+
+`vendor/supabase-js-2.112.0.umd.js` è la libreria client, copiata qui invece di essere
+scaricata da un CDN a ogni apertura. È il file che fa l'accesso e parla con la tabella:
+vede il codice mentre lo si digita, il token di sessione e ogni consegna che passa.
+Chiederlo a `cdn.jsdelivr.net` come `@2` ("l'ultima 2.x") voleva dire eseguire ogni giorno
+codice che nessuno ha guardato, e restare senza archivio ogni volta che la rete
+dell'ospedale filtra quel dominio.
+
+**Non ha una scadenza.** Una 2.x ferma continua a funzionare: l'API REST di Supabase è
+stabile dentro la major. Si sostituisce solo se c'è un motivo — un avviso di sicurezza sulla
+libreria, o Supabase che dismette qualcosa che questa versione usa. Non serve ricordarsene.
+
+Quando quel motivo arriva, da PowerShell (`$v` è la versione nuova):
+
+```powershell
+$v = "2.113.0"
+$meta = Invoke-RestMethod "https://registry.npmjs.org/@supabase/supabase-js/$v"
+Invoke-WebRequest $meta.dist.tarball -OutFile "$env:TEMP\sb.tgz"
+
+# 1. il pacchetto è quello che npm dice che è
+$h = [Convert]::ToBase64String(
+  [Security.Cryptography.SHA512]::Create().ComputeHash(
+    [IO.File]::ReadAllBytes("$env:TEMP\sb.tgz")))
+if ("sha512-$h" -ne $meta.dist.integrity) { throw "hash diverso: fermarsi qui" }
+
+# 2. si prende il file dal pacchetto, non dal CDN
+tar -xzf "$env:TEMP\sb.tgz" -C "$env:TEMP"
+Copy-Item "$env:TEMP\package\dist\umd\supabase.js" ".\vendor\supabase-js-$v.umd.js"
+```
+
+Poi si aggiorna l'unico `<script src="vendor/...">` in `index.html` con il nome nuovo, si
+cancella il file vecchio e si prova a entrare: se la libreria non si carica l'app lo dice da
+sé ("Archivio non raggiungibile") invece di rompersi in silenzio.
+
+Il passaggio 1 non è cerimonia: è l'unico punto in cui si verifica che il file sia davvero
+quello pubblicato. E va preso `dist/umd/supabase.js` — **non** `supabase.min.js`: quel nome
+nel pacchetto npm non esiste, era jsDelivr a fabbricarlo al volo minificando l'altro. Il
+file pubblicato è già minificato, pesa uguale.
+
 ## Note
 
 - I dati già presenti vanno considerati **potenzialmente già letti**: la tabella è stata

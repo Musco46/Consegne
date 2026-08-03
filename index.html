@@ -997,7 +997,15 @@
 </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<!-- supabase-js 2.112.0, servito da qui e non da un CDN. Quel file fa l'autenticazione e
+     parla con la tabella: vede il codice mentre lo si digita, il token di sessione e ogni
+     consegna che passa. Prenderlo da un indirizzo di terzi che risponde "l'ultima 2.x"
+     significava eseguire ogni giorno codice che nessuno ha guardato, e restare senza
+     archivio ogni volta che la rete dell'ospedale filtra quel dominio.
+     Non va aggiornato a scadenza: una 2.x ferma continua a funzionare (l'API REST di
+     Supabase e' stabile dentro la major). Si tocca solo se serve, e come, sta scritto in
+     CONFIGURAZIONE.md. -->
+<script src="vendor/supabase-js-2.112.0.umd.js"></script>
 <script>
 // La generazione della consegna è interamente locale: se lo script del CDN non arriva
 // (offline, rete che lo filtra) NON deve saltare tutto il resto del file, altrimenti nessun
