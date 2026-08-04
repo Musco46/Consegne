@@ -1102,9 +1102,15 @@ try {
 // decide se il codice si puo' chiedere, quando il server non risponde (v. avvia).
 const MODO_LOCALE = location.protocol === 'file:';
 
-// Si sta lavorando senza archivio: nessuna sessione aperta, niente elenco, niente
-// salvataggio. Ci si arriva dai due casi in cui il database e' fuori portata (v. apriLocale).
+// Si sta lavorando senza archivio remoto: nessuna sessione Supabase aperta. Ci si arriva dai due
+// casi in cui il database e' fuori portata (v. apriLocale).
 let soloLocale = false;
+
+// La schermata del codice sta chiedendo di aprire l'archivio offline, non di entrare in Supabase:
+// e' lo stesso codice, ma a verificarlo non c'e' nessun server (v. sbloccaOffline).
+let sbloccoOffline = false;
+// Quando e' stato aperto, per richiuderlo dopo un po' (v. SBLOCCO_LOCALE_MS).
+let sbloccatoIl = 0;
 
 const state = {};
 
@@ -2957,7 +2963,7 @@ async function saveConsegna(){
   // indirizzo online no: lì l'archivio è protetto dal codice, e appoggiare delle consegne nella
   // memoria del browser proprio quando il codice non è stato chiesto — script di Supabase non
   // arrivato — toglierebbe la protezione ai dati che quel codice esiste per proteggere.
-  if((!sb || soloLocale) && !MODO_LOCALE){
+  if((!sb || soloLocale) && !(MODO_LOCALE && chiaveDati)){
     alert('Salvataggio non disponibile: manca la connessione al database. La consegna si può comunque copiare.');
     return;
   }
@@ -2990,7 +2996,7 @@ async function saveConsegna(){
     creato_il: new Date(adesso()).toISOString()
   };
   if(soloLocale){
-    salvaInLocale(payload);
+    await salvaInLocale(payload);
     return;
   }
   // Qui il server c'è, ma la consegna aperta può venire dal disco: è il passaggio che porta in
@@ -3029,7 +3035,7 @@ async function saveConsegna(){
   if(!res) res = await sb.from('consegne_turno').insert(payload).select('id');
   const { data, error } = res;
   if(!error){
-    if(daPromuovere) scriviLocali(leggiLocali().filter(r => r.id !== daPromuovere));
+    if(daPromuovere) await scriviLocali((await leggiLocali()).filter(r => r.id !== daPromuovere));
     const row = data && data[0];
     if(row && row.id) currentConsegnaId = row.id;
     currentConsegnaLetto = letto;
@@ -3207,19 +3213,122 @@ async function eliminaConsegneVecchie(){
 // chiudendo la pagina, dopo un turno di lavoro. Hanno la stessa forma delle righe di Supabase,
 // così l'elenco e l'apertura non devono sapere da dove arriva una consegna.
 //
-// Sono dati clinici che restano in chiaro sul computer, e questa modalità il codice non lo
-// chiede: chi apre quel file li vede. È il prezzo che il file locale paga per esistere — senza
-// rete non c'è nessuno che possa dire se un codice è giusto — ed è il motivo per cui non se ne
-// tiene traccia dall'indirizzo online, dove il codice si può chiedere davvero (v. saveConsegna).
+// Sul disco ci vanno cifrate, e il codice di reparto è quello che le riapre. Non perché quel
+// computer sia sotto attacco — serve a tenere fuori chi in reparto non c'entra — ma perché
+// verificare un codice nella pagina non vorrebbe dire niente: il file è un documento di testo,
+// e chi sa cancellare tre righe di JavaScript entra comunque. Cifrare costa uguale e sposta il
+// problema dove sta davvero, cioè sui dati.
 const LOCALI_KEY = 'consegne-locali';
+const CHIAVE_KEY = 'consegne-chiave-locale';
 // Il prefisso distingue a colpo d'occhio un id nostro da un UUID di Supabase, ed è l'unica cosa
 // che dice, ovunque, se una consegna vive sul disco o sul database.
 const LOCALE_PREFIX = 'locale-';
 const idLocale = id => String(id || '').startsWith(LOCALE_PREFIX);
+// Le iterazioni servono a rendere lento ogni tentativo. Misurate: ~120 ms su questo computer,
+// cioè niente per chi apre l'archivio una volta a turno.
+const PBKDF2_ITER = 600000;
 
-function scriviLocali(righe){
+// Aperta finché la pagina resta aperta, e mai scritta da nessuna parte: chiudere il file
+// richiude l'archivio. Null = chiuso a chiave.
+let chiaveDati = null;
+
+const inB64 = buf => btoa(String.fromCharCode.apply(null, new Uint8Array(buf)));
+const daB64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+
+async function chiaveDaCodice(codice, salt){
+  const base = await crypto.subtle.importKey('raw', new TextEncoder().encode(codice), 'PBKDF2', false, ['deriveKey']);
+  return crypto.subtle.deriveKey(
+    { name: 'PBKDF2', salt, iterations: PBKDF2_ITER, hash: 'SHA-256' },
+    base, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+}
+
+async function cifra(chiave, testo){
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, chiave, new TextEncoder().encode(testo));
+  return { iv: inB64(iv), ct: inB64(ct) };
+}
+
+async function decifra(chiave, blob){
+  const pt = await crypto.subtle.decrypt(
+    { name: 'AES-GCM', iv: daB64(blob.iv) }, chiave, daB64(blob.ct));
+  return new TextDecoder().decode(pt);
+}
+
+function leggiScrigno(){
   try {
-    localStorage.setItem(LOCALI_KEY, JSON.stringify(righe));
+    const o = JSON.parse(localStorage.getItem(CHIAVE_KEY) || 'null');
+    return (o && o.salt && o.ct) ? o : null;
+  } catch(e){ return null; }
+}
+
+// Vero se su questo computer il codice si può verificare: c'è una chiave chiusa col codice, e
+// provare ad aprirla è la verifica. Senza, offline non c'è niente da chiedere a nessuno.
+const chiaveArmata = () => !!leggiScrigno();
+
+// C'è qualcosa scritto sul disco, aperto o no. Serve a sapere se vale la pena chiedere il codice
+// quando la rete c'è ma la sessione basterebbe da sola (v. avvia).
+function archivioLocalePresente(){
+  try { return !!localStorage.getItem(LOCALI_KEY); } catch(e){ return false; }
+}
+
+// La chiave che cifra davvero le consegne è casuale e non deriva dal codice: il codice chiude
+// soltanto la cassetta in cui sta. Così cambiare codice non obbliga a ricifrare l'archivio, e
+// un codice sbagliato non apre la cassetta invece di "non superare un controllo".
+async function apriChiaveDati(codice){
+  const scrigno = leggiScrigno();
+  if(!scrigno) return null;
+  try {
+    const chiusura = await chiaveDaCodice(codice, daB64(scrigno.salt));
+    const grezza = daB64(await decifra(chiusura, scrigno));
+    return await crypto.subtle.importKey('raw', grezza, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
+  } catch(e){
+    // AES-GCM rifiuta di decifrare con la chiave sbagliata: è questo il "codice non valido"
+    return null;
+  }
+}
+
+// Chiamata dopo un accesso online riuscito, e solo da lì: è l'unico momento in cui si sa che il
+// codice è davvero quello giusto, perché a dirlo è stato il server. Un codice preso per buono
+// offline sarebbe un refuso promosso a password, con l'archivio chiuso dentro.
+async function armaChiaveLocale(codice){
+  if(!MODO_LOCALE || !crypto.subtle) return;
+  try {
+    // Se il codice apre già la cassetta non si tocca niente: rifarla con una chiave nuova
+    // renderebbe illeggibile tutto quello che c'è scritto finora.
+    const esistente = await apriChiaveDati(codice);
+    if(esistente){ chiaveDati = esistente; return; }
+    // C'è una cassetta che questo codice non apre: è l'altro profilo, o il codice di prima. Il
+    // dispositivo resta di chi ce l'ha chiusa — riscriverla butterebbe via consegne che qualcun
+    // altro può ancora riaprire, e che comunque scadono da sole.
+    if(chiaveArmata()){
+      console.warn('Archivio offline già chiuso con un altro codice: lasciato com\'è.');
+      return;
+    }
+    const salt = crypto.getRandomValues(new Uint8Array(16));
+    const grezza = crypto.getRandomValues(new Uint8Array(32));
+    const chiusura = await chiaveDaCodice(codice, salt);
+    const blob = await cifra(chiusura, inB64(grezza));
+    localStorage.setItem(CHIAVE_KEY, JSON.stringify({ salt: inB64(salt), iv: blob.iv, ct: blob.ct }));
+    chiaveDati = await crypto.subtle.importKey('raw', grezza, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
+    // Quello che era stato salvato in chiaro dalla versione precedente passa sotto chiave adesso,
+    // invece di restare leggibile accanto a dati che non lo sono più.
+    const vecchie = localStorage.getItem(LOCALI_KEY);
+    if(vecchie && vecchie.trimStart().startsWith('[')){
+      try { await scriviLocali(JSON.parse(vecchie)); } catch(e){}
+    }
+  } catch(e){
+    console.error('Non è stato possibile preparare l\'archivio offline:', e);
+  }
+}
+
+async function scriviLocali(righe){
+  if(!chiaveDati) return false;
+  try {
+    const blob = await cifra(chiaveDati, JSON.stringify(righe));
+    // La data sta in chiaro accanto ai dati cifrati apposta: e' l'unica cosa che permette di
+    // buttare un blocco che nessuno puo' piu' aprire (codice cambiato), perche' le date delle
+    // singole consegne sono li' dentro e senza chiave non si leggono.
+    localStorage.setItem(LOCALI_KEY, JSON.stringify({ scrittoIl: Date.now(), iv: blob.iv, ct: blob.ct }));
     return true;
   } catch(e){
     // spazio esaurito, o storage negato (navigazione privata)
@@ -3227,26 +3336,34 @@ function scriviLocali(righe){
   }
 }
 
-function leggiLocali(){
-  let righe = null;
-  try { righe = JSON.parse(localStorage.getItem(LOCALI_KEY) || '[]'); } catch(e){}
-  if(!Array.isArray(righe)) return [];
+async function leggiLocali(){
+  if(!chiaveDati) return [];
+  let box = null;
+  try { box = JSON.parse(localStorage.getItem(LOCALI_KEY) || 'null'); } catch(e){}
+  if(!box || !box.ct) return [];
   // Stessa scadenza dell'archivio vero: sono gli stessi dati clinici, e non c'è motivo perché
   // durino di più solo perché sono stati scritti senza rete. Il metro però è Date.now() e non
   // adesso(): qui il server non c'è mai stato, quindi non c'è nessuno scarto da cui farsi
   // correggere, e scrittura e lettura fatte con lo stesso orologio danno comunque la differenza
-  // giusta anche se quell'orologio è sulla data sbagliata. Nel dubbio si tiene: una data
-  // illeggibile (NaN) non supera il confronto, e la riga sopravvive.
+  // giusta anche se quell'orologio è sulla data sbagliata.
+  if(box.scrittoIl && Date.now() - box.scrittoIl > CONSERVAZIONE_MS){
+    try { localStorage.removeItem(LOCALI_KEY); } catch(e){}
+    return [];
+  }
+  let righe = null;
+  try { righe = JSON.parse(await decifra(chiaveDati, box)); } catch(e){ return []; }
+  if(!Array.isArray(righe)) return [];
+  // Nel dubbio si tiene: una data illeggibile (NaN) non supera il confronto, e la riga sopravvive.
   const limite = Date.now() - CONSERVAZIONE_MS;
   const vive = righe.filter(r => r && !(Date.parse(r.creato_il || '') < limite));
-  if(vive.length !== righe.length) scriviLocali(vive);
+  if(vive.length !== righe.length) await scriviLocali(vive);
   return vive;
 }
 
 // Un letto = un paziente, come nell'archivio vero: riscrivere un letto sovrascrive invece di
 // affiancare una seconda riga, e la consegna aperta dall'elenco si aggiorna invece di duplicarsi.
-function salvaInLocale(payload){
-  const righe = leggiLocali();
+async function salvaInLocale(payload){
+  const righe = await leggiLocali();
   let i = -1;
   if(idLocale(currentConsegnaId) && payload.letto === currentConsegnaLetto){
     i = righe.findIndex(r => r.id === currentConsegnaId);
@@ -3256,7 +3373,7 @@ function salvaInLocale(payload){
     : LOCALE_PREFIX + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
   const riga = Object.assign({ id }, payload);
   if(i >= 0) righe[i] = riga; else righe.push(riga);
-  if(!scriviLocali(righe)){
+  if(!await scriviLocali(righe)){
     alert('Non è stato possibile salvare la consegna su questo computer. Conviene copiarla.');
     return;
   }
@@ -3277,7 +3394,7 @@ async function loadSavedList(){
   // ritrova più tanto vale non averlo. Riaprirne una e premere "Salva" la porta nell'archivio
   // vero — è il passaggio che nessuno può fare al posto di chi ha scritto, perché davanti a due
   // versioni dello stesso letto va deciso quale vale.
-  const locali = MODO_LOCALE ? leggiLocali() : [];
+  const locali = MODO_LOCALE ? await leggiLocali() : [];
   let remoti = [];
   if(sb && !soloLocale){
     section.style.display = '';
@@ -3371,7 +3488,7 @@ function migrateOldManualState(stato){
 async function loadConsegna(id){
   let item = null;
   if(idLocale(id)){
-    item = leggiLocali().find(r => r.id === id) || null;
+    item = (await leggiLocali()).find(r => r.id === id) || null;
     if(!item) return;
   } else {
     if(!sb) return;
@@ -3446,7 +3563,7 @@ async function loadConsegna(id){
 async function deleteConsegna(id){
   if(!confirm('Eliminare definitivamente questa consegna salvata?')) return;
   if(idLocale(id)){
-    scriviLocali(leggiLocali().filter(r => r.id !== id));
+    await scriviLocali((await leggiLocali()).filter(r => r.id !== id));
   } else {
     if(!sb) return;
     const { error } = await sb.from('consegne_turno').delete().eq('id', id);
@@ -3639,6 +3756,10 @@ async function esci(messaggio, pulisci){
     localStorage.removeItem(ACCESSO_DURATA_KEY);
   } catch(e){}
   appAperta = false;
+  // Si sta consegnando il computer a qualcun altro: anche l'archivio offline torna illeggibile,
+  // non solo nascosto.
+  chiaveDati = null;
+  sbloccatoIl = 0;
   if(pulisci) resetAll();
   // La bozza muore con il turno, SEMPRE — anche quando la pagina resta com'è, cioè alla
   // scadenza delle 12 ore. Chi rientra col codice sta cominciando un turno nuovo: se si
@@ -3654,9 +3775,29 @@ async function esci(messaggio, pulisci){
   mostraAccesso(messaggio);
 }
 
+// Offline il codice non si confronta con niente: si prova ad aprirci l'archivio. Se si apre era
+// quello giusto, e non c'è nessun "sì" da falsificare cancellando una riga di questo file.
+async function sbloccaOffline(codice){
+  btnAccesso.disabled = true;
+  msgAccesso.textContent = 'Apertura...';
+  const chiave = await apriChiaveDati(codice);
+  btnAccesso.disabled = false;
+  if(!chiave){
+    mostraAccesso('Codice non valido.');
+    return;
+  }
+  chiaveDati = chiave;
+  sbloccatoIl = Date.now();
+  sbloccoOffline = false;
+  msgAccesso.textContent = '';
+  apriLocale('Server non raggiungibile: archivio offline. Le consegne salvate restano solo su questo computer.');
+}
+
 async function entra(){
   const codice = campoCodice.value.trim();
-  if(!codice || !sb) return;
+  if(!codice) return;
+  if(sbloccoOffline){ await sbloccaOffline(codice); return; }
+  if(!sb) return;
   btnAccesso.disabled = true;
   msgAccesso.textContent = '';
 
@@ -3693,6 +3834,10 @@ async function entra(){
     localStorage.setItem(ACCESSO_DURATA_KEY, entrato.durata === null ? 'illimitata' : String(entrato.durata));
     localStorage.setItem(ACCESSO_EMAIL_KEY, entrato.email);
   } catch(e){}
+  // Il codice è appena stato dichiarato giusto dal server: è l'unico momento buono per chiudere
+  // con esso l'archivio offline di questo dispositivo, così la prossima volta senza rete si
+  // potrà riaprire (v. armaChiaveLocale). Prima di apriApp, che mostra già l'elenco.
+  await armaChiaveLocale(codice);
   apriApp();
 }
 
@@ -3702,10 +3847,35 @@ campoCodice.addEventListener('keydown', e => {
 });
 document.getElementById('esci-btn').addEventListener('click', () => esci('', true));
 
+// Offline si richiude prima: quattro ore invece di dodici. Non e' lo stesso rischio — li' non c'e'
+// nessun server che possa revocare niente, la pagina sta su un computer di reparto e l'archivio
+// aperto resta aperto finche' qualcuno non chiude il file. Quattro ore coprono la parte di turno
+// in cui si scrive davvero, e chi resta al computer rimette il codice una volta.
+const SBLOCCO_LOCALE_MS = 4 * 60 * 60 * 1000;
+
+// Richiude l'archivio e rimette davanti il codice. La chiave se ne va dalla memoria: da qui in
+// poi le consegne sul disco sono di nuovo illeggibili, non solo nascoste.
+function bloccaOffline(messaggio){
+  chiaveDati = null;
+  sbloccatoIl = 0;
+  sbloccoOffline = true;
+  // Come a fine turno online: la bozza muore, e la cronologia dell'annulla non deve poter
+  // riportare in pagina la consegna di chi c'era prima. Quello che è rimasto scritto resta,
+  // coperto dalla schermata del codice.
+  clearDraft();
+  dimenticaTutto();
+  document.getElementById('saved-list').innerHTML = '<p class="saved-empty">Caricamento...</p>';
+  document.getElementById('nota-locale').hidden = true;
+  mostraAccesso(messaggio);
+}
+
 // Il turno può finire mentre la pagina è aperta e nessuno la ricarica per ore: senza questo
 // controllo la sessione scadrebbe solo alla successiva operazione sull'archivio.
 setInterval(() => {
   if(appAperta && accessoScaduto()) esci('Turno terminato, reinserisci il codice.', false);
+  if(chiaveDati && soloLocale && Date.now() - sbloccatoIl > SBLOCCO_LOCALE_MS){
+    bloccaOffline('Sono passate quattro ore, reinserisci il codice.');
+  }
 }, 60000);
 
 // Se è Supabase a invalidare la sessione (codice cambiato, token non più rinnovabile) non
@@ -3745,7 +3915,17 @@ async function avvia(){
   // si ritrovi il file sul computer. Dall'indirizzo online non si salta mai: se il server non
   // risponde, da lì non si apre nemmeno la pagina.
   if(MODO_LOCALE && !serverRisponde){
-    apriLocale('Server non raggiungibile: archivio offline. Le consegne salvate restano solo su questo computer.');
+    // Il codice si può chiedere anche qui, ma solo se questo computer è già stato aperto una
+    // volta con la rete: è lì che il codice viene chiuso attorno all'archivio (v.
+    // armaChiaveLocale). Senza quel passaggio non c'è niente da verificare e niente da
+    // proteggere — l'archivio offline non esiste ancora — e chiedere un codice che nessuno può
+    // dire giusto vorrebbe dire solo tenere fuori chi ha bisogno della pagina.
+    if(chiaveArmata()){
+      sbloccoOffline = true;
+      mostraAccesso('Server non raggiungibile: inserisci il codice per aprire l\'archivio offline.');
+      return;
+    }
+    apriLocale('Server non raggiungibile: si può scrivere e copiare. Per avere anche l\'archivio offline, apri questo file una volta con la rete e inserisci il codice.');
     return;
   }
   let sessione = null;
@@ -3755,7 +3935,17 @@ async function avvia(){
   } catch(e){
     console.error('Sessione non leggibile:', e);
   }
-  if(sessione && !accessoScaduto()){ apriApp(); return; }
+  // Con una sessione ancora valida di solito non si chiede niente. Ma se su questo computer c'è
+  // un archivio offline chiuso a chiave, la sessione da sola non lo apre: la chiave sta dietro al
+  // codice, e il codice qui non l'ha digitato nessuno. Senza questo passaggio le consegne scritte
+  // senza rete resterebbero invisibili proprio quando la rete torna, cioè quando servono per
+  // essere portate in archivio.
+  const daRiaprire = MODO_LOCALE && chiaveArmata() && archivioLocalePresente() && !chiaveDati;
+  if(sessione && !accessoScaduto() && !daRiaprire){ apriApp(); return; }
+  if(sessione && daRiaprire){
+    mostraAccesso('Ci sono consegne salvate offline su questo computer: inserisci il codice per riaprirle.');
+    return;
+  }
   if(sessione){
     try { await sb.auth.signOut(); } catch(e){}
     mostraAccesso('Turno terminato, reinserisci il codice.');
