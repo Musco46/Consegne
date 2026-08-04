@@ -377,6 +377,18 @@
   .saved-item-meta{color:var(--ink);font-size:.75rem;}
   .saved-item-date{color:var(--sub);font-size:.68rem;}
 
+  /* Non e' un errore: e' una cosa che l'app ha fatto da se', e che deve dire di aver fatto.
+     Altrimenti i chip spenti sembrano un guasto e si riaccendono a mano. */
+  .avviso-attivita{
+    margin:0 0 12px;
+    padding:8px 11px;
+    background:#FFFCF2;
+    border:1px solid #EBD9A0;
+    border-radius:8px;
+    font-size:.8rem;
+    color:#7A6100;
+  }
+
   @media (min-width:900px){
     .layout{
       display:flex;
@@ -911,6 +923,8 @@
   <!-- 6 - ATTIVITÀ DI TURNO -->
   <section class="card s6" id="sec-6">
     <h2><span class="badge">6</span>Attività di turno</h2>
+    <p class="avviso-attivita" id="avviso-attivita" hidden>Le attività del turno precedente non
+      sono state riportate: questa sezione riparte vuota.</p>
 
     <div class="group" data-group="T-presidi" data-mode="checkbox">
       <div class="group-label">Presidi</div>
@@ -1669,6 +1683,35 @@ const PRESIDIO_PIECE_KEYS = AZIONI_PRESIDI.map(a => a.pieceKey);
 const PRESIDIO_STATO_GROUPS = Object.keys(PRESIDIO_STATO).map(k => PRESIDIO_STATO[k]);
 const AZIONE_PIECE_BY_STATO = {};
 AZIONI_PRESIDI.forEach(a => { AZIONE_PIECE_BY_STATO[a.stato] = a.pieceKey; });
+
+// Le sezioni 1-5 dicono com'e' il bambino adesso: riaprire il letto e ritrovarle e' proprio il
+// motivo per cui lo si riapre. Queste invece dicono che cosa e' stato FATTO in quel turno, e
+// non si ereditano: riportate tali e quali, una medicazione di ieri finisce in cartella come
+// fatta oggi, e nessuno se ne accorge.
+// Il presidio e il drenaggio NON stanno in questo elenco: quelli il bambino ce li ha ancora,
+// sono stato, e restano accesi. A ripartire da zero e' solo quello che ci si e' fatto sopra --
+// cosi' i pannelli sono gia' aperti e basta segnare l'azione di oggi.
+const GRUPPI_ATTIVITA_DI_TURNO = ['T-esami', 'T-assistenza']
+  .concat(PRESIDIO_STATO_GROUPS, DRENAGGIO_AZIONI_GROUPS);
+// Le stesse categorie viste dal lato del testo, per sciogliere anche quello che fosse stato
+// riscritto a mano al posto loro: senza, resterebbe scritto nero su bianco esattamente quello
+// che i chip hanno appena smesso di dire.
+const PEZZI_ATTIVITA_DI_TURNO = ['T-esami', 'T-assistenza', 'T-medicazione-dispositivi']
+  .concat(PRESIDIO_PIECE_KEYS, DRENAGGIO_PIECE_KEYS);
+
+function dimenticaAttivitaDelTurnoPrecedente(){
+  GRUPPI_ATTIVITA_DI_TURNO.forEach(g => {
+    state[g] = [];
+    document.querySelectorAll(`[data-group="${g}"] .flag`).forEach(f => f.classList.remove('on'));
+  });
+  unfreezePieceKeys(PEZZI_ATTIVITA_DI_TURNO);
+  refreshFlagAria();
+}
+
+function mostraAvvisoAttivita(mostra){
+  const el = document.getElementById('avviso-attivita');
+  if(el) el.hidden = !mostra;
+}
 
 // Ordine fisso dei "pezzi" possibili all'interno di ciascuna sezione (anche quelli non
 // attivi in un dato momento): serve a sectionSegments per poter reinserire al posto giusto
@@ -2722,6 +2765,7 @@ function resetAll(){
   currentConsegnaLetto = null;
   refreshFlagAria();
   verificaTutteLeScale();
+  mostraAvvisoAttivita(false);
   // Modulo vuoto: non c'e' niente da salvare, e il tasto lo dice.
   segnaSalvato();
   render();
@@ -2753,6 +2797,16 @@ function normalizzaLetto(valore){
     .replace(/^0+(?=\d)/, '')              // "03" -> "3", ma il letto "0" resta "0"
     .replace(/(\d)\s+([A-Za-z])/g, '$1$2') // "3 a" -> "3a"
     .toUpperCase();
+}
+
+// Come si mette in fila un letto. Si parte dalla forma normalizzata, cosi' "03" e "3" finiscono
+// nello stesso posto, e si separa il numero dalla lettera: "3A" viene dopo "3" e prima di "4".
+// Un letto senza numero davanti (qualcuno ci scrive un nome) non ha un posto nel giro: va in
+// fondo, in ordine alfabetico fra i suoi.
+function ordineLetto(letto){
+  const l = normalizzaLetto(letto);
+  const m = l.match(/^(\d+)(.*)$/);
+  return m ? [0, Number(m[1]), m[2]] : [1, 0, l];
 }
 
 // Si normalizza quando si esce dal campo, non a ogni tasto: mentre si digita "03" il primo
@@ -3051,7 +3105,17 @@ async function loadSavedList(){
     section.style.display = 'none';
     return;
   }
-  container.innerHTML = items.map(item => {
+  // In ordine di letto, che e' l'ordine in cui si fa il giro: cercare il letto 7 fra consegne
+  // messe in fila per ora di scrittura vuol dire scorrerle tutte. E in ordine di NUMERO, non di
+  // testo, se no il 10 finisce fra l'1 e il 2. L'ordinamento per data resta quello che arriva
+  // dal database, quindi fra due righe sullo stesso letto -- doppioni vecchi -- la piu' recente
+  // resta prima: sort() in JavaScript non scambia elementi che considera pari.
+  const inOrdine = items.slice().sort((a, b) => {
+    const [ka, na, sa] = ordineLetto(a.letto);
+    const [kb, nb, sb] = ordineLetto(b.letto);
+    return ka - kb || na - nb || sa.localeCompare(sb, 'it');
+  });
+  container.innerHTML = inOrdine.map(item => {
     const dt = item.creato_il ? new Date(item.creato_il) : null;
     const dtStr = dt ? dt.toLocaleString('it-IT', {day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}) : '';
     let meta = [];
@@ -3124,6 +3188,12 @@ async function loadConsegna(id){
   // altrimenti restano selezionati i chip della consegna caricata prima e il primo click su
   // un chip qualsiasi rigenera il testo da uno stato che non c'entra nulla con questa.
   const hasState = item.stato && Object.keys(item.stato).length;
+  // Oltre le 12 ore la consegna e' di un altro turno, e le sue attivita' sono di qualcun altro.
+  // Sotto, si sta semplicemente aggiornando la propria: quelle attivita' sono davvero le
+  // proprie e vanno tenute. La misura e' sull'ora del server, come ogni altra scadenza qui.
+  // Se la data non si legge non si azzera niente: nel dubbio non si butta via del lavoro.
+  const salvataIl = Date.parse(item.creato_il || '');
+  const diUnAltroTurno = !isNaN(salvataIl) && (adesso() - salvataIl) > TURNO_MS;
   applyState(hasState ? (item.stato.groups || item.stato) : (item.sesso ? { sesso: [item.sesso] } : null), item.inputs);
   // Dopo applyState, che azzera tutti i campi, ma PRIMA di render(), che legge l'età per
   // l'apertura della frase neurologica ("Bambino...", "Piccola..."): le consegne salvate
@@ -3137,6 +3207,7 @@ async function loadConsegna(id){
     if(item.stato.manualPieces) manualPieces = JSON.parse(JSON.stringify(item.stato.manualPieces));
     if(item.stato.blockNotes) blockNotes = JSON.parse(JSON.stringify(item.stato.blockNotes));
     migrateOldManualState(item.stato);
+    if(diUnAltroTurno) dimenticaAttivitaDelTurnoPrecedente();
     render();
   } else {
     const testo = item.testo || '';
@@ -3149,6 +3220,11 @@ async function loadConsegna(id){
   currentConsegnaLetto = normalizzaLetto(item.letto);
   // Appena aperta dall'archivio: quello che si vede e' esattamente quello che c'e' salvato.
   segnaSalvato();
+  // A meno che le attivita' del turno prima non siano state tolte: allora quello che si vede
+  // non e' piu' quello che sta in archivio, e il tasto Salva deve dirlo.
+  const attivitaTolte = diUnAltroTurno && !!hasState;
+  if(attivitaTolte) segnaModificato();
+  mostraAvvisoAttivita(attivitaTolte);
   clearOutputHighlight();
   // La consegna appena aperta è da adesso il lavoro in corso: va nella bozza locale, così
   // sopravvive a un ricaricamento come tutto il resto. Serve anche per il ramo senza stato
