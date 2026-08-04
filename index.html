@@ -376,6 +376,21 @@
   .saved-item-name{font-weight:600;font-size:.82rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .saved-item-meta{color:var(--ink);font-size:.75rem;}
   .saved-item-date{color:var(--sub);font-size:.68rem;}
+  /* Una consegna che esiste solo su questo computer si deve distinguere da lontano da una che
+     sta in archivio: stessa forma, colore diverso, e scritto a lettere. */
+  .saved-item.locale{border-color:#EBD9A0;background:#FFFCF2;}
+  .saved-item.locale:hover{background:#FBF5E3;border-color:#DCC77F;}
+  .saved-item-solo-qui{color:#7A6100;font-size:.66rem;line-height:1.2;margin-top:1px;}
+  .nota-locale{
+    margin:0 0 12px;
+    padding:8px 11px;
+    background:#FFFCF2;
+    border:1px solid #EBD9A0;
+    border-radius:8px;
+    font-size:.8rem;
+    color:#7A6100;
+  }
+  .nota-locale[hidden]{display:none;}
 
   /* Non e' un errore: e' una cosa che l'app ha fatto da se', e che deve dire di aver fatto.
      Altrimenti i chip spenti sembrano un guasto e si riaccendono a mano. */
@@ -494,6 +509,10 @@
   <div class="barra-sessione" id="barra-sessione">
     <button type="button" class="esci" id="esci-btn">Esci</button>
   </div>
+
+  <!-- Sta fuori dalle "Consegne salvate" apposta: quella scheda sparisce quando non ce n'e'
+       nessuna, ed e' proprio il momento in cui questo avviso serve di piu'. -->
+  <p class="nota-locale" id="nota-locale" hidden></p>
 
   <section class="card" id="saved-section">
     <h2 style="margin:0 0 12px;font-size:1.05rem;">Consegne salvate</h2>
@@ -2934,10 +2953,11 @@ function segnaSalvato(){
 }
 
 async function saveConsegna(){
-  // 'soloLocale' e' l'altro modo di non avere il database: il client c'e', ma nessuno ha fatto
-  // l'accesso perche' il server non rispondeva. Senza questo controllo il salvataggio partirebbe
-  // lo stesso, per fallire dopo l'attesa di rete con un errore generico.
-  if(!sb || soloLocale){
+  // Senza database si scrive sul disco (v. salvaInLocale), ma solo dalla copia locale. Dall'
+  // indirizzo online no: lì l'archivio è protetto dal codice, e appoggiare delle consegne nella
+  // memoria del browser proprio quando il codice non è stato chiesto — script di Supabase non
+  // arrivato — toglierebbe la protezione ai dati che quel codice esiste per proteggere.
+  if((!sb || soloLocale) && !MODO_LOCALE){
     alert('Salvataggio non disponibile: manca la connessione al database. La consegna si può comunque copiare.');
     return;
   }
@@ -2969,10 +2989,20 @@ async function saveConsegna(){
     // partenza, cancellate alla prima apertura successiva; una avanti le avrebbe rese eterne.
     creato_il: new Date(adesso()).toISOString()
   };
+  if(soloLocale){
+    salvaInLocale(payload);
+    return;
+  }
+  // Qui il server c'è, ma la consegna aperta può venire dal disco: è il passaggio che porta in
+  // archivio quello che si era scritto offline. Il suo id è una stringa nostra, non una riga da
+  // aggiornare — passarla a un .eq('id', ...) sarebbe solo un errore di tipo — quindi si lascia
+  // che la consegna prenda la strada normale, e a salvataggio riuscito la copia sul disco se ne
+  // va: adesso vive in archivio, e tenerla anche qui vorrebbe dire vederla due volte nell'elenco.
+  const daPromuovere = idLocale(currentConsegnaId) ? currentConsegnaId : null;
   // Se la consegna è stata aperta dall'elenco, "Salva" la aggiorna: prima ogni salvataggio
   // creava una riga nuova, quindi aggiornare una consegna a fine turno la duplicava.
   let res = null;
-  if(currentConsegnaId && letto === currentConsegnaLetto){
+  if(currentConsegnaId && !daPromuovere && letto === currentConsegnaLetto){
     res = await sb.from('consegne_turno').update(payload).eq('id', currentConsegnaId).select('id');
     // La riga può essere sparita nel frattempo (cancellata da un altro dispositivo): l'update
     // non tocca nulla e non dà errore, quindi il salvataggio finirebbe nel vuoto. Si ricrea.
@@ -2999,6 +3029,7 @@ async function saveConsegna(){
   if(!res) res = await sb.from('consegne_turno').insert(payload).select('id');
   const { data, error } = res;
   if(!error){
+    if(daPromuovere) scriviLocali(leggiLocali().filter(r => r.id !== daPromuovere));
     const row = data && data[0];
     if(row && row.id) currentConsegnaId = row.id;
     currentConsegnaLetto = letto;
@@ -3110,15 +3141,15 @@ document.getElementById('saved-list').addEventListener('keydown', e => {
 // turno, che per una scadenza di sedici giorni è più che abbastanza.
 const CONSERVAZIONE_MS = 16 * 24 * 60 * 60 * 1000;
 
+// Quanto si aspetta prima di dire che il server non c'è. Un indirizzo che non esiste fallisce
+// subito, ma una rete che ingoia i pacchetti senza rispondere — il filtro dell'ospedale —
+// terrebbe la richiesta appesa per minuti. Questa attesa è diventata la porta d'ingresso della
+// copia locale: senza un limite, chi apre il file offline resterebbe fermo davanti al codice.
+const SERVER_TIMEOUT_MS = 8000;
+
 // L'ora la si chiede al server, mai al dispositivo. Se l'orologio di un computer del reparto
 // fosse avanti di un mese — succede, dopo un cambio di scheda madre o una batteria scarica —
 // una scadenza calcolata sul suo Date.now() cancellerebbe le consegne di oggi.
-// Quanto si aspetta prima di dire che il server non c'e'. Un indirizzo che non esiste fallisce
-// subito, ma una rete che ingoia i pacchetti senza rispondere -- il filtro dell'ospedale -- terrebbe
-// la richiesta appesa per minuti. Questa attesa e' diventata la porta d'ingresso della copia
-// locale: senza un limite, chi apre il file offline resterebbe fermo davanti al codice.
-const SERVER_TIMEOUT_MS = 8000;
-
 async function oraDelServer(){
   const stop = new AbortController();
   const scadenza = setTimeout(() => stop.abort(), SERVER_TIMEOUT_MS);
@@ -3170,38 +3201,118 @@ async function eliminaConsegneVecchie(){
   if(error) console.error('Pulizia delle consegne scadute non riuscita:', error);
 }
 
+// ------------------------------------------------------------------ archivio su questo disco
+// Le consegne scritte dalla copia locale mentre il server non risponde. L'archivio vero è
+// irraggiungibile per definizione, in quel momento: senza un posto dove metterle sparirebbero
+// chiudendo la pagina, dopo un turno di lavoro. Hanno la stessa forma delle righe di Supabase,
+// così l'elenco e l'apertura non devono sapere da dove arriva una consegna.
+//
+// Sono dati clinici che restano in chiaro sul computer, e questa modalità il codice non lo
+// chiede: chi apre quel file li vede. È il prezzo che il file locale paga per esistere — senza
+// rete non c'è nessuno che possa dire se un codice è giusto — ed è il motivo per cui non se ne
+// tiene traccia dall'indirizzo online, dove il codice si può chiedere davvero (v. saveConsegna).
+const LOCALI_KEY = 'consegne-locali';
+// Il prefisso distingue a colpo d'occhio un id nostro da un UUID di Supabase, ed è l'unica cosa
+// che dice, ovunque, se una consegna vive sul disco o sul database.
+const LOCALE_PREFIX = 'locale-';
+const idLocale = id => String(id || '').startsWith(LOCALE_PREFIX);
+
+function scriviLocali(righe){
+  try {
+    localStorage.setItem(LOCALI_KEY, JSON.stringify(righe));
+    return true;
+  } catch(e){
+    // spazio esaurito, o storage negato (navigazione privata)
+    return false;
+  }
+}
+
+function leggiLocali(){
+  let righe = null;
+  try { righe = JSON.parse(localStorage.getItem(LOCALI_KEY) || '[]'); } catch(e){}
+  if(!Array.isArray(righe)) return [];
+  // Stessa scadenza dell'archivio vero: sono gli stessi dati clinici, e non c'è motivo perché
+  // durino di più solo perché sono stati scritti senza rete. Il metro però è Date.now() e non
+  // adesso(): qui il server non c'è mai stato, quindi non c'è nessuno scarto da cui farsi
+  // correggere, e scrittura e lettura fatte con lo stesso orologio danno comunque la differenza
+  // giusta anche se quell'orologio è sulla data sbagliata. Nel dubbio si tiene: una data
+  // illeggibile (NaN) non supera il confronto, e la riga sopravvive.
+  const limite = Date.now() - CONSERVAZIONE_MS;
+  const vive = righe.filter(r => r && !(Date.parse(r.creato_il || '') < limite));
+  if(vive.length !== righe.length) scriviLocali(vive);
+  return vive;
+}
+
+// Un letto = un paziente, come nell'archivio vero: riscrivere un letto sovrascrive invece di
+// affiancare una seconda riga, e la consegna aperta dall'elenco si aggiorna invece di duplicarsi.
+function salvaInLocale(payload){
+  const righe = leggiLocali();
+  let i = -1;
+  if(idLocale(currentConsegnaId) && payload.letto === currentConsegnaLetto){
+    i = righe.findIndex(r => r.id === currentConsegnaId);
+  }
+  if(i < 0) i = righe.findIndex(r => normalizzaLetto(r.letto) === payload.letto);
+  const id = i >= 0 ? righe[i].id
+    : LOCALE_PREFIX + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+  const riga = Object.assign({ id }, payload);
+  if(i >= 0) righe[i] = riga; else righe.push(riga);
+  if(!scriviLocali(righe)){
+    alert('Non è stato possibile salvare la consegna su questo computer. Conviene copiarla.');
+    return;
+  }
+  currentConsegnaId = id;
+  currentConsegnaLetto = payload.letto;
+  segnaSalvato();
+  const msg = document.getElementById('saved-msg');
+  msg.style.display = 'inline';
+  setTimeout(() => msg.style.display = 'none', 1500);
+  loadSavedList();
+}
+
 async function loadSavedList(){
   const container = document.getElementById('saved-list');
   const section = document.getElementById('saved-section');
-  if(!sb){
+  // Le consegne scritte senza server restano visibili anche dopo, a codice inserito e archivio
+  // che risponde: stanno sul disco, solo questa copia può mostrarle, e un archivio che non si
+  // ritrova più tanto vale non averlo. Riaprirne una e premere "Salva" la porta nell'archivio
+  // vero — è il passaggio che nessuno può fare al posto di chi ha scritto, perché davanti a due
+  // versioni dello stesso letto va deciso quale vale.
+  const locali = MODO_LOCALE ? leggiLocali() : [];
+  let remoti = [];
+  if(sb && !soloLocale){
+    section.style.display = '';
+    container.innerHTML = '<p class="saved-empty">Caricamento...</p>';
+    // Solo le colonne che finiscono nelle card. Con "*" si scaricava anche il testo integrale
+    // di OGNI consegna mai salvata (più stato e inputs) per mostrarne letto, età, sesso e data.
+    const { data: items, error } = await sb.from('consegne_turno')
+      .select('id,letto,eta,sesso,creato_il').order('creato_il', { ascending: false });
+    if(error){
+      console.error('Errore nel caricamento elenco:', error);
+      container.innerHTML = '<p class="saved-empty">Impossibile caricare le consegne salvate.</p>';
+      return;
+    }
+    remoti = items || [];
+  }
+  const tutte = remoti.concat(locali);
+  if(tutte.length === 0){
     section.style.display = 'none';
     return;
   }
   section.style.display = '';
-  container.innerHTML = '<p class="saved-empty">Caricamento...</p>';
-  // Solo le colonne che finiscono nelle card. Con "*" si scaricava anche il testo integrale
-  // di OGNI consegna mai salvata (più stato e inputs) per mostrarne letto, età, sesso e data.
-  const { data: items, error } = await sb.from('consegne_turno')
-    .select('id,letto,eta,sesso,creato_il').order('creato_il', { ascending: false });
-  if(error){
-    console.error('Errore nel caricamento elenco:', error);
-    container.innerHTML = '<p class="saved-empty">Impossibile caricare le consegne salvate.</p>';
-    return;
-  }
-  if(!items || items.length === 0){
-    section.style.display = 'none';
-    return;
-  }
   // In ordine di letto, che e' l'ordine in cui si fa il giro: cercare il letto 7 fra consegne
   // messe in fila per ora di scrittura vuol dire scorrerle tutte. E in ordine di NUMERO, non di
-  // testo, se no il 10 finisce fra l'1 e il 2. L'ordinamento per data resta quello che arriva
-  // dal database, quindi fra due righe sullo stesso letto -- doppioni vecchi -- la piu' recente
-  // resta prima: sort() in JavaScript non scambia elementi che considera pari.
-  const inOrdine = items.slice().sort((a, b) => {
-    const [ka, na, sa] = ordineLetto(a.letto);
-    const [kb, nb, sb] = ordineLetto(b.letto);
-    return ka - kb || na - nb || sa.localeCompare(sb, 'it');
-  });
+  // testo, se no il 10 finisce fra l'1 e il 2. Fra due righe sullo stesso letto -- doppioni
+  // vecchi, o la stessa consegna scritta prima offline e poi in archivio -- resta prima la piu'
+  // recente: e' il primo sort, che il secondo non disfa perche' sort() in JavaScript non scambia
+  // elementi che considera pari. Prima bastava l'ordine che arrivava dal database; adesso che
+  // nella stessa lista finiscono anche righe dal disco, la data va rimessa in fila qui.
+  const inOrdine = tutte.slice()
+    .sort((a, b) => (Date.parse(b.creato_il || '') || 0) - (Date.parse(a.creato_il || '') || 0))
+    .sort((a, b) => {
+      const [ka, na, sa] = ordineLetto(a.letto);
+      const [kb, nb, sb] = ordineLetto(b.letto);
+      return ka - kb || na - nb || sa.localeCompare(sb, 'it');
+    });
   container.innerHTML = inOrdine.map(item => {
     const dt = item.creato_il ? new Date(item.creato_il) : null;
     const dtStr = dt ? dt.toLocaleString('it-IT', {day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}) : '';
@@ -3209,11 +3320,16 @@ async function loadSavedList(){
     if(item.eta) meta.push(`${escapeHtml(item.eta)} anni`);
     if(item.sesso) meta.push(escapeHtml(item.sesso));
     const metaStr = meta.join(' · ');
-    return `<div class="saved-item" role="button" tabindex="0" data-id="${escapeHtml(item.id)}">
+    // Il bollino non e' decorazione: quella consegna esiste solo qui, non la vede nessun altro
+    // computer e non la vede il sito. Senza, sarebbe identica a una salvata in archivio.
+    const bollino = idLocale(item.id)
+      ? '<div class="saved-item-solo-qui">solo su questo computer</div>' : '';
+    return `<div class="saved-item${idLocale(item.id) ? ' locale' : ''}" role="button" tabindex="0" data-id="${escapeHtml(item.id)}">
       <button class="saved-item-x" data-action="delete" type="button" title="Elimina">×</button>
       <div class="saved-item-name">Letto ${escapeHtml(item.letto || '—')}</div>
       ${metaStr ? `<div class="saved-item-meta">${metaStr}</div>` : ''}
       <div class="saved-item-date">${dtStr}</div>
+      ${bollino}
     </div>`;
   }).join('');
 }
@@ -3253,11 +3369,18 @@ function migrateOldManualState(stato){
 }
 
 async function loadConsegna(id){
-  if(!sb) return;
-  const { data: item, error } = await sb.from('consegne_turno').select('*').eq('id', id).single();
-  if(error || !item){
-    console.error('Errore nel caricamento:', error);
-    return;
+  let item = null;
+  if(idLocale(id)){
+    item = leggiLocali().find(r => r.id === id) || null;
+    if(!item) return;
+  } else {
+    if(!sb) return;
+    const { data, error } = await sb.from('consegne_turno').select('*').eq('id', id).single();
+    if(error || !data){
+      console.error('Errore nel caricamento:', error);
+      return;
+    }
+    item = data;
   }
   // Aprire una consegna dall'archivio sostituisce tutto quello che si aveva in pagina: se la
   // card e' stata toccata per sbaglio, senza questo il lavoro in corso sarebbe perso. Si
@@ -3321,10 +3444,14 @@ async function loadConsegna(id){
 }
 
 async function deleteConsegna(id){
-  if(!sb) return;
   if(!confirm('Eliminare definitivamente questa consegna salvata?')) return;
-  const { error } = await sb.from('consegne_turno').delete().eq('id', id);
-  if(error) console.error(error);
+  if(idLocale(id)){
+    scriviLocali(leggiLocali().filter(r => r.id !== id));
+  } else {
+    if(!sb) return;
+    const { error } = await sb.from('consegne_turno').delete().eq('id', id);
+    if(error) console.error(error);
+  }
   // la consegna cancellata non esiste più: un salvataggio successivo deve crearne una nuova,
   // non tentare di aggiornare una riga sparita (l'update non troverebbe nulla da scrivere).
   if(String(id) === String(currentConsegnaId)){
@@ -3612,13 +3739,13 @@ async function avvia(){
   // Il file aperto col doppio clic è la scorta per quando il sito non si raggiunge. Lì il
   // codice non si può verificare — è il server a dire se è giusto — quindi chiederlo vorrebbe
   // dire tenere fuori chi ha bisogno della pagina proprio nel momento in cui gli serve. Si
-  // entra diretti, ma solo per scrivere e copiare.
+  // entra diretti, e quello che si salva resta sul disco (v. l'archivio su questo disco).
   // Se invece il server risponde, il codice si chiede anche al file locale: da lì l'archivio
   // funziona davvero (stesso database del sito), e saltare l'accesso lo aprirebbe a chiunque
   // si ritrovi il file sul computer. Dall'indirizzo online non si salta mai: se il server non
   // risponde, da lì non si apre nemmeno la pagina.
   if(MODO_LOCALE && !serverRisponde){
-    apriLocale('Server non raggiungibile: questa copia scrive e copia, ma l\'archivio è sul sito.');
+    apriLocale('Server non raggiungibile: le consegne salvate restano su questo computer e non le vede nessun altro. Quando la rete torna, riaprile e premi Salva per portarle in archivio.');
     return;
   }
   let sessione = null;
@@ -3637,11 +3764,17 @@ async function avvia(){
   mostraAccesso('');
 }
 
-// Si apre la pagina senza essere entrati da nessuna parte. La bozza NON si ripristina: sta sul
-// dispositivo e sarebbe l'unica cosa clinica visibile senza aver messo il codice.
+// Si apre la pagina senza essere entrati da nessuna parte.
 // 'appAperta' resta falsa apposta: non c'è nessuna sessione da far scadere, e i due controlli
 // che chiamano esci() — le 12 ore e onAuthStateChange — qui rimetterebbero davanti un codice
 // che in questa modalità non serve a niente.
+//
+// La bozza torna su solo dalla copia locale. Prima non tornava mai: era l'unica cosa clinica
+// che si sarebbe vista senza aver messo il codice. Da quando le consegne salvate offline
+// restano su quel disco, sulla copia locale quel confine non c'è più — chi apre il file le vede
+// comunque — e tenere fuori la bozza serviva solo a far perdere la consegna in corso a chi
+// ricaricava la pagina. Dall'indirizzo online invece il codice si può chiedere davvero, quindi
+// il ragionamento di prima vale ancora, intatto.
 function apriLocale(messaggio){
   soloLocale = true;
   bloccaContenuto(false);
@@ -3649,15 +3782,18 @@ function apriLocale(messaggio){
   // Nessuna sessione da chiudere: qui non si è entrati da nessuna parte, e un tasto "Esci"
   // che non esce da niente si limiterebbe a rimettere davanti un codice che non serve.
   document.getElementById('barra-sessione').hidden = true;
-  // Il messaggio va dove sarebbero state le consegne salvate: è lì che si guarda per cercarle,
-  // ed è lì che deve essere scritto perché non ci sono. Non trovarne traccia da nessuna parte
-  // vorrebbe dire scrivere per un turno intero credendo di star salvando.
-  document.getElementById('saved-list').innerHTML =
-    '<p class="saved-empty">' + messaggio + '</p>';
+  // Detto una volta, in alto, e detto per esteso: si sta lavorando senza archivio, e da qui in
+  // poi tutto quello che si vede va letto con quella premessa. Non dirlo vorrebbe dire scrivere
+  // per un turno intero credendo che le consegne stiano andando dove vanno di solito.
+  const nota = document.getElementById('nota-locale');
+  nota.textContent = messaggio;
+  nota.hidden = false;
+  if(MODO_LOCALE) restoreDraft();
+  loadSavedList();
 }
 
 document.getElementById('accesso-locale').addEventListener('click', () => {
-  apriLocale('Archivio non raggiungibile.');
+  apriLocale('Archivio non raggiungibile: si può scrivere e copiare, ma non salvare.');
 });
 
 avvia();
