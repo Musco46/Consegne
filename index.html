@@ -3745,7 +3745,7 @@ async function avvia(){
   // si ritrovi il file sul computer. Dall'indirizzo online non si salta mai: se il server non
   // risponde, da lì non si apre nemmeno la pagina.
   if(MODO_LOCALE && !serverRisponde){
-    apriLocale('Server non raggiungibile: le consegne salvate restano su questo computer e non le vede nessun altro. Quando la rete torna, riaprile e premi Salva per portarle in archivio.');
+    apriLocale('Server non raggiungibile: archivio offline. Le consegne salvate restano solo su questo computer.');
     return;
   }
   let sessione = null;
