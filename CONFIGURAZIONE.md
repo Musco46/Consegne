@@ -1,6 +1,6 @@
 # Configurazione dell'accesso
 
-Il sito è pubblico (Vercel, `consegneria.vercel.app`) e la chiave Supabase che sta in
+Il sito è pubblico (Vercel, `consegneturno.vercel.app`) e la chiave Supabase che sta in
 `index.html` è **pubblicabile per progetto**: non è un segreto e non protegge nulla. La
 protezione sono le policy della tabella.
 
