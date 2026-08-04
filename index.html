@@ -1521,11 +1521,20 @@ function verificaTutteLeScale(){
 function joinPhrases(arr, sep=', '){
   return arr.filter(Boolean).join(sep);
 }
+// La "d" eufonica va davanti alla STESSA vocale ("ed ematiche", "ed EEG"), non davanti a una
+// vocale qualsiasi: "ed abbondanti" è la regola vecchia, oggi si scrive "e abbondanti".
+// Il confronto salta gli eventuali marcatori invisibili dell'evidenziazione, che possono
+// trovarsi davanti alla parola senza farne parte.
+function congiunzione(prossima){
+  return /^[\u0001\u0002]*[eE]/.test(prossima) ? ' ed ' : ' e ';
+}
+
 function joinItalian(arr){
   const a = arr.filter(Boolean);
   if(a.length === 0) return '';
   if(a.length === 1) return a[0];
-  return a.slice(0, -1).join(', ') + ' e ' + a[a.length - 1];
+  const ultima = a[a.length - 1];
+  return a.slice(0, -1).join(', ') + congiunzione(ultima) + ultima;
 }
 
 function ageOpeningWord(eta, sesso){
@@ -1661,12 +1670,35 @@ const PRESIDIO_STATO = {
 // nome dell'azione ("eseguita rimozione di...") e non con l'aggettivo ("rimossi..."), così
 // non serve concordare niente con un elenco di presidi di generi diversi. Un presidio con
 // più azioni compare in più frasi: è quello che è successo davvero nel turno.
+// 'frase' è la forma quando l'azione riguarda più presidi ("eseguita medicazione di CVC, CVP e
+// tracheostomia"); 'nome' e 'genere' servono quando invece è un presidio solo ad averne più
+// d'una, e allora si raggruppa al contrario (vedi più in basso, in render).
 const AZIONI_PRESIDI = [
-  { stato: 'medicato',     pieceKey: 'T-pres-medicazione',   frase: 'eseguita medicazione di' },
-  { stato: 'posizionato',  pieceKey: 'T-pres-posizionamento', frase: 'eseguito posizionamento di' },
-  { stato: 'cambio linea', pieceKey: 'T-pres-cambio-linea',  frase: 'eseguito cambio linea di' },
-  { stato: 'rimosso',      pieceKey: 'T-pres-rimozione',     frase: 'eseguita rimozione di' }
+  { stato: 'medicato',     pieceKey: 'T-pres-medicazione',    frase: 'eseguita medicazione',    nome: 'medicazione',    genere: 'f' },
+  { stato: 'posizionato',  pieceKey: 'T-pres-posizionamento', frase: 'eseguito posizionamento', nome: 'posizionamento', genere: 'm' },
+  { stato: 'cambio linea', pieceKey: 'T-pres-cambio-linea',   frase: 'eseguito cambio linea',   nome: 'cambio linea',   genere: 'm' },
+  { stato: 'rimosso',      pieceKey: 'T-pres-rimozione',      frase: 'eseguita rimozione',      nome: 'rimozione',      genere: 'f' }
 ];
+// Come va detto ogni esame nel testo, e come si concorda "eseguito/a/i/e". La chiave è il
+// data-text del chip, che non si tocca: è quella con cui le consegne già salvate li riaccendono.
+// 'numero' non si ricava contando i chip — "prelievi ematici" è un chip solo ma è già plurale.
+const ESAMI_CONCORDANZA = {
+  'eseguiti prelievi ematici':           { genere: 'm', numero: 'p', nome: 'prelievi ematici' },
+  'eseguita emogasanalisi di controllo': { genere: 'f', numero: 's', nome: 'EGA di controllo' },
+  'eseguite emocolture':                 { genere: 'f', numero: 'p', nome: 'emocolture' },
+  'fibroscopia':                         { genere: 'f', numero: 's', nome: 'fibroscopia' },
+  'RX':                                  { genere: 'm', numero: 's', nome: 'RX' },
+  'TAC':                                 { genere: 'f', numero: 's', nome: 'TAC' },
+  'risonanza magnetica':                 { genere: 'f', numero: 's', nome: 'risonanza magnetica' },
+  'EEG':                                 { genere: 'm', numero: 's', nome: 'EEG' }
+};
+
+// L'articolo del presidio, per quando è uno solo: "medicazione del CVC", "rimozione della
+// tracheostomia". Con più presidi in elenco regge meglio il "di" nudo.
+const ARTICOLO_PRESIDIO = {
+  'CVC': 'del', 'CVP': 'del', 'linea arteriosa': 'della',
+  'tracheostomia': 'della', 'gastrostomia': 'della'
+};
 // Gli stessi tre "che cosa ci è stato fatto" valgono per i drenaggi (una linea non ce l'hanno,
 // quindi niente cambio linea), e si raggruppano allo stesso modo.
 const AZIONI_DRENAGGI = [
@@ -1679,7 +1711,10 @@ const DRENAGGIO_AZIONI_GROUPS = ['AC-tor-azioni', 'AC-add-azioni', 'AC-cra-azion
 const AZIONE_DRENAGGIO_PIECE_BY_STATO = {};
 AZIONI_DRENAGGI.forEach(a => { AZIONE_DRENAGGIO_PIECE_BY_STATO[a.stato] = a.pieceKey; });
 
-const PRESIDIO_PIECE_KEYS = AZIONI_PRESIDI.map(a => a.pieceKey);
+// La frase unica di un presidio con più azioni è un pezzo a sé, distinto da quelli per azione:
+// serve una chiave sua perché possa essere congelata, sciolta e rimessa in ordine come le altre.
+const PRESIDIO_PIECE_UNICO = 'T-pres-unico';
+const PRESIDIO_PIECE_KEYS = AZIONI_PRESIDI.map(a => a.pieceKey).concat(PRESIDIO_PIECE_UNICO);
 const PRESIDIO_STATO_GROUPS = Object.keys(PRESIDIO_STATO).map(k => PRESIDIO_STATO[k]);
 const AZIONE_PIECE_BY_STATO = {};
 AZIONI_PRESIDI.forEach(a => { AZIONE_PIECE_BY_STATO[a.stato] = a.pieceKey; });
@@ -1813,10 +1848,12 @@ function render(){
   let nParts = [];
   if(state['N-coscienza'] && state['N-coscienza'].length){
     let coscienzaArr = state['N-coscienza'].slice();
+    // I due chip insieme sono una cosa sola, e "semi-sedato, vigile" la diceva due volte:
+    // semi-sedato vuol già dire sveglio in parte. Una frase unica, col "ma" che tiene insieme
+    // le due metà. La concordanza al femminile la fa feminizeText sulla coppia 'semi-sedato'.
     if(coscienzaArr.includes('vigile') && coscienzaArr.includes('sedato')){
-      coscienzaArr = coscienzaArr.filter(t => t !== 'sedato');
-      coscienzaArr = coscienzaArr.map(t => t === 'vigile' ? 'vigile' : t);
-      coscienzaArr.unshift('semi-sedato');
+      coscienzaArr = coscienzaArr.filter(t => t !== 'sedato' && t !== 'vigile');
+      coscienzaArr.unshift('semi-sedato ma vigile');
     }
     nParts.push(mark(sourceMatches('N-coscienza'), joinPhrases(coscienzaArr)));
   }
@@ -1934,9 +1971,11 @@ function render(){
     let stateTxt = `${prefix} ${cStatoWord}`;
     if(hasAmine) stateTxt += ', sostenuta da ammine';
     cParts.push({ pieceKey: 'C-stato', text: mark(sourceMatches('C-stato', 'C-catetere-arterioso', 'C-amine'), stateTxt) });
-  } else if(hasAmine){
-    cParts.push({ pieceKey: 'C-stato', text: mark(sourceMatches('C-amine'), 'sostenuta da ammine') });
   }
+  // Senza Stabile/Instabile le ammine non scrivono niente. Prima uscivano da sole, "Sostenuta
+  // da ammine.", con un participio femminile riferito a una pressione arteriosa che nella frase
+  // non c'era: e da sole non dicono comunque nulla di utile, perché il punto è che cosa
+  // sostengono. Il chip resta acceso e torna a parlare appena si sceglie l'emodinamica.
   if(state['C-cute'] && state['C-cute'][0]) cParts.push({ pieceKey: 'C-cute', text: mark(sourceMatches('C-cute'), state['C-cute'][0]) });
   let cTemp = state['C-temp'] && state['C-temp'][0];
   const tempVal = document.getElementById('temp-val').value;
@@ -2055,7 +2094,11 @@ function render(){
     const altro = feciArr.filter(t => !t.startsWith('feci '));
     const feciBits = [];
     if(consistenza.length) feciBits.push('feci ' + joinItalian(consistenza));
-    feciBits.push(...altro);
+    // "presenza di muco, presenza di sangue" nominava due volte la presenza: si dice una volta
+    // sola e si elenca che cosa c'è.
+    const presenze = altro.filter(t => t.startsWith('presenza di ')).map(t => t.slice('presenza di '.length));
+    if(presenze.length) feciBits.push('presenza di ' + joinItalian(presenze));
+    feciBits.push(...altro.filter(t => !t.startsWith('presenza di ')));
     uParts.push({ pieceKey: 'U-alvo', text: mark(sourceMatches('U-alvo', 'U-feci-sel'), feciBits.length ? `${uAlvo}, ${joinPhrases(feciBits)}` : uAlvo) });
   }
 
@@ -2094,7 +2137,7 @@ function render(){
     // drenato, che è un'altra informazione)
     if(aspirazioneFull) str += ` ${aspirazioneFull}`;
     if(qtaVal){
-      str += `, ha drenato circa ${qtaVal}ml di materiale` + (materialeTxt ? ` ${materialeTxt}` : '');
+      str += `, ha drenato circa ${qtaVal} ml di materiale` + (materialeTxt ? ` ${materialeTxt}` : '');
     } else if(materialeTxt){
       str += `, drenato ${materialeTxt}`;
     }
@@ -2140,31 +2183,54 @@ function render(){
   // Una frase per azione, con l'elenco dei presidi a cui è stata fatta. Il presidio da solo
   // non scrive niente: qui si raccontano le attività del turno, e la sola presenza di un
   // presidio non è un'attività (è la sottocategoria a dire che cosa ci è stato fatto).
-  AZIONI_PRESIDI.forEach(az => {
-    const labels = (state['T-presidi'] || [])
-      .filter(v => PRESIDIO_STATO[v] && (state[PRESIDIO_STATO[v]] || []).includes(az.stato));
-    if(!labels.length) return;
-    const isSource = sourceMatches('T-presidi', ...PRESIDIO_STATO_GROUPS) && pieceMatches(az.pieceKey);
-    tParts.push({ pieceKey: az.pieceKey, text: mark(isSource, `${az.frase} ${joinItalian(labels)}`) });
-  });
+  // Che cosa è stato fatto, presidio per presidio. Da qui si decide da che parte raggruppare.
+  const azioniPerPresidio = (state['T-presidi'] || [])
+    .filter(v => PRESIDIO_STATO[v])
+    .map(v => ({ presidio: v, azioni: AZIONI_PRESIDI.filter(az => (state[PRESIDIO_STATO[v]] || []).includes(az.stato)) }))
+    .filter(p => p.azioni.length);
+  const presidiSonoFonte = sourceMatches('T-presidi', ...PRESIDIO_STATO_GROUPS);
+
+  if(azioniPerPresidio.length === 1 && azioniPerPresidio[0].azioni.length > 1){
+    // Un presidio solo con più azioni: si raggruppa per presidio invece che per azione, se no
+    // uscivano tre frasi in fila che finivano tutte con lo stesso nome ("...di CVC. ...di CVC.
+    // ...di CVC."). Qui l'evidenziazione prende la frase intera: è una sola, e l'azione appena
+    // toccata non ha una propria frase da illuminare.
+    const { presidio, azioni } = azioniPerPresidio[0];
+    const participio = azioni.every(a => a.genere === 'f') ? 'eseguite' : 'eseguiti';
+    const txt = `${participio} ${joinItalian(azioni.map(a => a.nome))} ${ARTICOLO_PRESIDIO[presidio] || 'di'} ${presidio}`;
+    tParts.push({ pieceKey: PRESIDIO_PIECE_UNICO, text: mark(presidiSonoFonte, txt) });
+  } else {
+    AZIONI_PRESIDI.forEach(az => {
+      const labels = azioniPerPresidio.filter(p => p.azioni.includes(az)).map(p => p.presidio);
+      if(!labels.length) return;
+      // Con un presidio solo ci vuole l'articolo ("medicazione del CVC"); con più di uno il "di"
+      // nudo regge l'elenco meglio ("medicazione di CVC, CVP e tracheostomia").
+      const complemento = labels.length === 1
+        ? `${ARTICOLO_PRESIDIO[labels[0]] || 'di'} ${labels[0]}`
+        : `di ${joinItalian(labels)}`;
+      tParts.push({ pieceKey: az.pieceKey, text: mark(presidiSonoFonte && pieceMatches(az.pieceKey), `${az.frase} ${complemento}`) });
+    });
+  }
 
   if(state['T-esami'] && state['T-esami'].length){
-    // genere di ogni esame strumentale, per concordare "eseguito/a/i/e": con più esami di
-    // genere diverso vince il maschile plurale, come vuole l'italiano
-    const strumentali = { 'fibroscopia': 'f', 'RX': 'm', 'TAC': 'f', 'risonanza magnetica': 'f', 'EEG': 'm' };
-    const esamiArr = state['T-esami'].filter(t => !strumentali[t]);
-    const strumentaliArr = state['T-esami'].filter(t => strumentali[t]);
-    // "emogasanalisi" si abbrevia in EGA solo nel testo prodotto: il chip resta per esteso, e
-    // il suo data-text è la chiave con cui le consegne già salvate riaccendono i chip.
-    const esamiBits = esamiArr.map(t => t.replace('emogasanalisi', 'EGA'));
-    if(strumentaliArr.length){
-      const tutteFemminili = strumentaliArr.every(t => strumentali[t] === 'f');
-      const participio = strumentaliArr.length === 1
-        ? (tutteFemminili ? 'eseguita' : 'eseguito')
-        : (tutteFemminili ? 'eseguite' : 'eseguiti');
-      esamiBits.push(participio + ' ' + joinItalian(strumentaliArr));
-    }
-    tParts.push({ pieceKey: 'T-esami', text: mark(sourceMatches('T-esami'), esamiBits.join('. ')) });
+    // Una frase sola per tutti gli esami. Prima erano due — una per i prelievi, una per gli
+    // strumentali — e cominciavano tutt'e due con "Eseguiti", una dietro l'altra.
+    // Il "eseguiti/e" sta scritto dentro il data-text di alcuni chip, che non si può cambiare
+    // (è la chiave con cui le consegne salvate li riaccendono): 'nome' è come vanno detti qui,
+    // senza participio, e 'emogasanalisi' diventa EGA per la stessa ragione.
+    const voci = state['T-esami'].map(t => ESAMI_CONCORDANZA[t]
+      // Un esame che non conosciamo (chip di una versione vecchia, rimasto in una consegna
+      // salvata) va comunque riportato: si tira via il participio e si tratta da singolare.
+      || { genere: 'm', numero: 's', nome: t.replace(/^esegui\w+\s+/i, '') });
+    // Generi diversi nello stesso elenco: vince il maschile plurale, come vuole l'italiano.
+    const femminile = voci.every(v => v.genere === 'f');
+    // Plurale se gli esami sono più d'uno, o se l'unico che c'è è già plurale di suo
+    // ("prelievi ematici", "emocolture").
+    const plurale = voci.length > 1 || voci[0].numero === 'p';
+    const participio = plurale ? (femminile ? 'eseguite' : 'eseguiti')
+                               : (femminile ? 'eseguita' : 'eseguito');
+    tParts.push({ pieceKey: 'T-esami', text: mark(sourceMatches('T-esami'),
+      participio + ' ' + joinItalian(voci.map(v => v.nome))) });
   }
 
   if(state['T-assistenza'] && state['T-assistenza'].length){
