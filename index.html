@@ -111,6 +111,10 @@
     font-family:inherit;
   }
   .inline-input input.wide{width:220px;}
+  /* Valore fuori dai limiti plausibili: si vede, non blocca. L'ambra e' la stessa della
+     sezione 4 -- e' un "guarda qui", non un errore, e il rosso qui direbbe troppo. */
+  .inline-input input.fuori-scala{border-color:var(--n4);background:#FFFCF2;}
+  .avviso-scala{font-size:.72rem;color:#8A6D00;font-weight:600;white-space:nowrap;}
 
   .sub-flags{
     margin-top:8px;
@@ -309,6 +313,11 @@
   }
   button.copy{background:var(--ink);color:white;}
   button.save{background:var(--save);color:white;}
+  /* Il verde pieno vuol dire "c'e' qualcosa da salvare". Quando non c'e', il tasto si spegne e
+     lo dice: a fine turno la domanda e' proprio quella, e prima si poteva rispondere solo
+     premendo. Spento ma non disabilitato -- salvare di nuovo non fa danni, e un tasto che non
+     si preme e' un tasto che si smette di guardare. */
+  button.save.pulito{background:#EEF1F3;color:var(--sub);}
   button.reset{background:#EEF1F3;color:var(--ink);}
   .copied{color:var(--save);font-size:.82rem;margin-left:4px;align-self:center;}
 
@@ -1017,7 +1026,7 @@
     </div>
     <div class="actions">
       <button class="act copy" onclick="copyOutput()">Copia</button>
-      <button class="act save" onclick="saveConsegna()">Salva</button>
+      <button class="act save pulito" id="save-btn" onclick="saveConsegna()">Salva</button>
       <button class="act reset" onclick="resetAll()">Cancella</button>
       <span class="copied" id="copied-msg" style="display:none;">Copiato ✓</span>
       <span class="copied" id="saved-msg" style="display:none;">Salvata ✓</span>
@@ -1405,6 +1414,7 @@ document.querySelectorAll('.flag').forEach(flag => {
       : null;
     unfreezePieceKeys(pieceKeysForGroup(groupName, flag.dataset.text).concat(extraPieceKeys).filter(Boolean));
     refreshFlagAria();
+    segnaModificato();
     render();
     // Si ancora al ".group" più esterno (non al gruppo/sotto-pannello più vicino usato per
     // la logica di stato): categorie come Emodinamica o Diuresi hanno più contenitori
@@ -1415,6 +1425,68 @@ document.querySelectorAll('.flag').forEach(flag => {
   });
 });
 
+// Limiti dei campi numerici. NON bloccano: il valore si scrive lo stesso e finisce nel testo.
+// In rianimazione il caso fuori scala esiste davvero, e un campo che rifiuta quello che il
+// monitor sta mostrando e' solo un campo contro cui si combatte. Servono a far vedere adesso
+// il "40" battuto come "400", invece che in cartella, dove un numero ha gia' l'aria di essere
+// stato controllato da qualcuno.
+// Sono i valori plausibili in una rianimazione pediatrica: si correggono qui, e basta.
+const LIMITI_CAMPI = {
+  'fio2-val':         { min: 21,  max: 100,  unita: '%' },
+  'peep-val':         { min: 0,   max: 20,   unita: 'cmH2O' },
+  'sopra-peep-val':   { min: 0,   max: 40,   unita: 'cmH2O' },
+  'flusso-val':       { min: 0.5, max: 60,   unita: '' },   // la sigla e' gia' scritta accanto
+  'o2-lmin-val':      { min: 0.1, max: 15,   unita: 'L/min' },
+  'atti-val':         { min: 5,   max: 80,   unita: '/min' },
+  'temp-val':         { min: 30,  max: 43,   unita: '°C' },
+  'ristagno-qta-val': { min: 0,   max: 500,  unita: 'ml' },
+  'tor-asp-val':      { min: 0,   max: 40,   unita: 'cmH2O' },
+  'add-asp-val':      { min: 0,   max: 40,   unita: 'cmH2O' },
+  'cra-asp-val':      { min: 0,   max: 40,   unita: 'cmH2O' },
+  'alt-asp-val':      { min: 0,   max: 40,   unita: 'cmH2O' },
+  'tor-qta-val':      { min: 0,   max: 2000, unita: 'ml/24h' },
+  'add-qta-val':      { min: 0,   max: 2000, unita: 'ml/24h' },
+  'cra-qta-val':      { min: 0,   max: 2000, unita: 'ml/24h' },
+  'alt-qta-val':      { min: 0,   max: 2000, unita: 'ml/24h' }
+};
+// L'eta' resta senza limiti di proposito: nel testo non compare, decide solo la parola di
+// apertura ("Bimbo", "Ragazza", "Paziente"). Un numero battuto male si legge subito nella
+// consegna, e non c'e' niente da segnalare che non si veda gia'.
+
+// La virgola e' quella che esce dal tastierino italiano: "0,4" va letto come 0,4 e non come
+// zero. Nel testo prodotto il valore resta esattamente come lo si e' scritto: qui si legge e
+// basta, non si corregge niente sotto le dita.
+function numeroDelCampo(valore){
+  const n = parseFloat(String(valore).replace(',', '.'));
+  return isNaN(n) ? null : n;
+}
+
+function verificaScala(el){
+  if(!el) return;
+  const precedente = el.parentNode && el.parentNode.querySelector('.avviso-scala');
+  if(precedente) precedente.remove();
+  el.classList.remove('fuori-scala');
+  el.removeAttribute('aria-invalid');
+  const lim = LIMITI_CAMPI[el.id];
+  if(!lim) return;
+  const n = numeroDelCampo(el.value);
+  // Campo vuoto, o scritto in un modo che numero non e' ("0,4 (40%)"): questo controllo non ha
+  // il compito di dire come si scrive, solo di far notare un valore implausibile.
+  if(n === null || (n >= lim.min && n <= lim.max)) return;
+  el.classList.add('fuori-scala');
+  el.setAttribute('aria-invalid', 'true');
+  const avviso = document.createElement('span');
+  avviso.className = 'avviso-scala';
+  avviso.textContent = `${lim.min}–${lim.max} ${lim.unita}`.trim();
+  // Accanto al campo e sempre visibile: un title non si vede su un telefono, che e' proprio
+  // dove si scrive di fretta e con una mano sola.
+  el.insertAdjacentElement('afterend', avviso);
+}
+
+function verificaTutteLeScale(){
+  Object.keys(LIMITI_CAMPI).forEach(id => verificaScala(document.getElementById(id)));
+}
+
 ['fio2-val','peep-val','sopra-peep-val','atti-val','modalita-val','o2-lmin-val','eta-val','flusso-val',
  'temp-val','ristagno-qta-val','altro-sede-val',
  'tor-asp-val','tor-qta-val','add-asp-val','add-qta-val','cra-asp-val','cra-qta-val','alt-asp-val','alt-qta-val'].forEach(id => {
@@ -1423,6 +1495,8 @@ document.querySelectorAll('.flag').forEach(flag => {
     // Una foto per campo, non per tasto: l'id fa da fonte e le battute successive nello
     // stesso campo si accodano a quella.
     ricorda(id);
+    verificaScala(el);
+    segnaModificato();
     highlightSource = id;
     highlightPiece = null;
     unfreezePieceKeys(pieceKeysForGroup(id));
@@ -2267,6 +2341,7 @@ document.getElementById('output').addEventListener('input', () => {
   // il Ctrl+Z del browser continua a fare l'annulla carattere per carattere, quindi qui il
   // passo grosso non toglie niente, lo affianca.
   ricorda('output');
+  segnaModificato();
   const textarea = document.getElementById('output');
   const currentLines = textarea.value.split('\n');
   const known = lastRenderedLines;
@@ -2602,6 +2677,8 @@ function annulla(){
   sottoCategorieSopite = s.sopite;
   currentConsegnaId = s.consegnaId;
   currentConsegnaLetto = s.consegnaLetto;
+  // Un passo indietro e' comunque uno scostamento da quello che sta in archivio.
+  segnaModificato();
   lastRenderedLines = [];
   highlightSource = null;
   highlightPiece = null;
@@ -2644,6 +2721,9 @@ function resetAll(){
   currentConsegnaId = null;
   currentConsegnaLetto = null;
   refreshFlagAria();
+  verificaTutteLeScale();
+  // Modulo vuoto: non c'e' niente da salvare, e il tasto lo dice.
+  segnaSalvato();
   render();
   clearOutputHighlight();
   // "Cancella" vuol dire ripartire puliti: la bozza va tolta DOPO il render, che ne
@@ -2686,6 +2766,7 @@ function normalizzaLetto(valore){
   // nulla da ricostruire: solo le due cose che al letto servono davvero.
   el.addEventListener('input', () => {
     ricorda('letto-val');
+    segnaModificato();
     saveDraft();
   });
   el.addEventListener('blur', () => {
@@ -2698,6 +2779,31 @@ function normalizzaLetto(valore){
     }
   });
 })();
+
+// --------------------------------------------------- "questa consegna e' gia' in archivio?"
+// Guardando lo schermo non si poteva sapere: il "Salvata" verde dura un secondo e mezzo e poi
+// non resta niente. A fine turno e' esattamente la domanda che ci si fa, e l'unico modo di
+// rispondere era premere Salva un'altra volta per sicurezza.
+let modificheNonSalvate = false;
+
+function aggiornaTastoSalva(){
+  const b = document.getElementById('save-btn');
+  if(!b) return;
+  b.classList.toggle('pulito', !modificheNonSalvate);
+  // "Salvata" solo se in archivio c'e' davvero qualcosa: su un modulo vuoto sarebbe una bugia.
+  b.textContent = (!modificheNonSalvate && currentConsegnaId) ? 'Salvata' : 'Salva';
+}
+
+function segnaModificato(){
+  if(modificheNonSalvate) return;
+  modificheNonSalvate = true;
+  aggiornaTastoSalva();
+}
+
+function segnaSalvato(){
+  modificheNonSalvate = false;
+  aggiornaTastoSalva();
+}
 
 async function saveConsegna(){
   if(!sb){
@@ -2765,6 +2871,7 @@ async function saveConsegna(){
     const row = data && data[0];
     if(row && row.id) currentConsegnaId = row.id;
     currentConsegnaLetto = letto;
+    segnaSalvato();
     const msg = document.getElementById('saved-msg');
     msg.style.display = 'inline';
     setTimeout(() => msg.style.display = 'none', 1500);
@@ -2834,6 +2941,9 @@ function applyState(savedState, savedInputs){
   });
   updateVentParamsVisibility();
   refreshFlagAria();
+  // Unico posto da cui passano tutti i ripristini di campi (annulla, bozza, consegna aperta
+  // dall'archivio): gli avvisi fuori scala si rifanno qui, invece che in ognuno di quelli.
+  verificaTutteLeScale();
 }
 
 // Un solo gestore sul contenitore, invece di un onclick inline per riga: gli id non finiscono
@@ -3037,6 +3147,8 @@ async function loadConsegna(id){
   // Da qui in poi "Salva" aggiorna questa consegna invece di crearne una copia.
   currentConsegnaId = item.id;
   currentConsegnaLetto = normalizzaLetto(item.letto);
+  // Appena aperta dall'archivio: quello che si vede e' esattamente quello che c'e' salvato.
+  segnaSalvato();
   clearOutputHighlight();
   // La consegna appena aperta è da adesso il lavoro in corso: va nella bozza locale, così
   // sopravvive a un ricaricamento come tutto il resto. Serve anche per il ramo senza stato
@@ -3070,10 +3182,16 @@ const DRAFT_KEY = 'consegne-turno-bozza';
 // dispositivo e quanto dura l'accesso della postazione. Se la copia locale sopravvivesse alla
 // sessione, dei dati clinici resterebbero sul computer dopo che l'accesso è già scaduto.
 const TURNO_MS = 12 * 60 * 60 * 1000;
-// Oltre questo tempo la bozza non è più "quella che stavo scrivendo" ma quella di un turno
-// passato, di un altro paziente: meglio ripartire puliti che ritrovarsi in pagina dati
-// vecchi da riconoscere e cancellare a mano.
-const DRAFT_MAX_AGE_MS = TURNO_MS;
+// Quanto vive la bozza dall'ultima modifica. Durava come un turno intero, ed era troppo.
+// Su una postazione c'è un infermiere per volta: finché A tiene aperto il letto 1, nessun
+// altro scrive il letto 1. Se qualcuno lo riscrive vuol dire che il turno è già cambiato, e
+// allora a valere dev'essere l'ultimo che ha scritto — non una bozza di sei ore prima che
+// risale da sola e ci si rimette sopra premendo Salva.
+// La bozza serve a non perdere il lavoro per un ricaricamento, o per il telefono che scarica
+// la scheda mentre si passa a un'altra app: sono minuti. E conta SOLO dopo che la pagina è
+// stata chiusa o ricaricata — finché resta aperta non si perde niente comunque, qualunque sia
+// questo numero. Due ore coprono l'incidente con abbondanza e non arrivano al turno dopo.
+const DRAFT_MAX_AGE_MS = 2 * 60 * 60 * 1000;
 
 let draftSaveTimer = null;
 function saveDraft(){
@@ -3094,7 +3212,10 @@ function saveDraft(){
         sottoCategorieSopite,
         inputs: collectInputs(),
         consegnaId: currentConsegnaId,
-        consegnaLetto: currentConsegnaLetto
+        consegnaLetto: currentConsegnaLetto,
+        // Se ne va anche il "c'e' qualcosa da salvare": al ritorno da un ricaricamento il tasto
+        // deve dire il vero, e da solo non potrebbe saperlo.
+        nonSalvato: modificheNonSalvate
       }));
     } catch(e){
       // spazio esaurito, o storage negato (Safari in navigazione privata): la bozza è una
@@ -3130,6 +3251,8 @@ function restoreDraft(){
   // aggiornare quella invece di affiancarle una copia.
   currentConsegnaId = draft.consegnaId || null;
   currentConsegnaLetto = draft.consegnaLetto || null;
+  modificheNonSalvate = !!draft.nonSalvato;
+  aggiornaTastoSalva();
   render();
   clearOutputHighlight();
 }
@@ -3227,6 +3350,12 @@ async function esci(messaggio, pulisci){
   } catch(e){}
   appAperta = false;
   if(pulisci) resetAll();
+  // La bozza muore con il turno, SEMPRE — anche quando la pagina resta com'è, cioè alla
+  // scadenza delle 12 ore. Chi rientra col codice sta cominciando un turno nuovo: se si
+  // ritrovasse addosso la bozza di prima e premesse Salva, si rimetterebbe sopra la consegna
+  // che nel frattempo ha scritto qualcun altro. Quello che è rimasto in pagina invece resta:
+  // è sotto gli occhi di chi rientra, mentre la bozza torna su da sola e senza dirlo.
+  clearDraft();
   // La cronologia dell'annulla non deve sopravvivere all'uscita: se no, chi arriva dopo al
   // computer del reparto potrebbe riportare in pagina la consegna di chi c'era prima.
   dimenticaTutto();
