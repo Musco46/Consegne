@@ -131,6 +131,13 @@ Come funziona, in breve:
   dispositivo: un computer con la data avanti cancellerebbe le consegne di oggi. Se il server
   non risponde con un'ora, non si cancella niente.
 
+L'ora del server si chiede **una volta all'apertura**: da lì l'app tiene lo scarto rispetto
+all'orologio locale e se lo porta dietro. Lo stesso scarto governa anche la **scadenza delle
+12 ore** del codice di reparto, che prima si fidava del solo orologio del computer — su una
+postazione con la data indietro il turno non finiva mai. Resta fuori portata solo l'orologio
+spostato a sessione già aperta: servirebbe un tempo monotono che il browser non offre, e non
+vale una richiesta di rete al minuto.
+
 Il prezzo è che la pulizia avviene solo quando qualcuno apre l'app. In un reparto vuol dire
 ogni turno, che per una scadenza di sedici giorni basta e avanza.
 

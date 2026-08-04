@@ -228,7 +228,6 @@
     overflow-y:auto;
   }
   .output-wrap.collapsed .output-body{display:none;}
-  .output-wrap.collapsed .toggle-btn::after{content:'';}
 
   /* Modalità estesa (solo mobile): il riquadro copre tutto lo schermo, per rileggere o
      ricopiare a mano la consegna senza doverla far scorrere in una finestrella alta pochi
@@ -2387,8 +2386,11 @@ document.addEventListener('keydown', e => {
 // della consegna generata così restano visibili i flag e il campo che si sta compilando.
 // Quando la tastiera si chiude (nessun altro campo ha il focus), il riquadro si riapre
 // da solo, ma solo se era stato chiuso automaticamente per fare spazio alla tastiera.
+// Il perimetro è <main>, come per valueInputs: il campo della schermata di accesso è un input
+// come gli altri, e senza questo confine digitare il codice muoveva il riquadro della consegna
+// dietro all'overlay, per poi riaprirlo da solo un istante dopo.
 let outputAutoCollapsed = false;
-document.querySelectorAll('input, select').forEach(el => {
+document.querySelectorAll('main input, main select').forEach(el => {
   el.addEventListener('focus', () => {
     const wrap = document.getElementById('output-wrap');
     // a schermo intero il form è coperto dal riquadro: non c'è spazio da liberare
@@ -2401,7 +2403,8 @@ document.querySelectorAll('input, select').forEach(el => {
   el.addEventListener('blur', () => {
     setTimeout(() => {
       const active = document.activeElement;
-      const stillEditing = active && (active.tagName === 'INPUT' || active.tagName === 'SELECT');
+      const stillEditing = active && active.closest('main')
+        && (active.tagName === 'INPUT' || active.tagName === 'SELECT');
       if(!stillEditing && outputAutoCollapsed && !document.getElementById('output-wrap').classList.contains('expanded')){
         const wrap = document.getElementById('output-wrap');
         wrap.classList.remove('collapsed');
@@ -2459,7 +2462,9 @@ function buildOutputMirror(textarea, start, end){
   // uno span vuoto non ha né posizione né altezza: lo spazio a larghezza zero gliene dà una
   span.textContent = value.slice(start, end) || '​';
   mirror.appendChild(span);
-  mirror.appendChild(document.createTextNode(value.slice(start + span.textContent.length)));
+  // La coda riparte da 'end', non dalla lunghezza dello span: con un intervallo vuoto lo spazio
+  // a larghezza zero conta come un carattere e si mangerebbe il primo della coda.
+  mirror.appendChild(document.createTextNode(value.slice(end)));
   return { mirror, span, cs };
 }
 
@@ -2674,6 +2679,15 @@ function normalizzaLetto(valore){
 // carattere è uno zero, e cancellarlo sotto le dita sarebbe solo fastidioso.
 (function(){
   const el = document.getElementById('letto-val');
+  // Il letto non compare nel testo della consegna, quindi non passa da render() come gli altri
+  // campi — ed era l'unico modo che aveva di finire nella bozza. Scritto "3" (già normalizzato,
+  // quindi nemmeno il blur qui sotto scriveva niente) e ricaricata la pagina, il letto era
+  // perso; e nessuna battuta era un passo dell'annulla. Niente render(), che qui non avrebbe
+  // nulla da ricostruire: solo le due cose che al letto servono davvero.
+  el.addEventListener('input', () => {
+    ricorda('letto-val');
+    saveDraft();
+  });
   el.addEventListener('blur', () => {
     const pulito = normalizzaLetto(el.value);
     // Si riscrive nel campo, non solo nei dati: quello che si salva dev'essere quello che si
@@ -2853,9 +2867,7 @@ const CONSERVAZIONE_MS = 16 * 24 * 60 * 60 * 1000;
 
 // L'ora la si chiede al server, mai al dispositivo. Se l'orologio di un computer del reparto
 // fosse avanti di un mese — succede, dopo un cambio di scheda madre o una batteria scarica —
-// una scadenza calcolata sul suo Date.now() cancellerebbe le consegne di oggi. Se il server
-// non risponde con un'ora, non si cancella niente: meglio una consegna di troppo in archivio
-// che una persa per un orologio sbagliato.
+// una scadenza calcolata sul suo Date.now() cancellerebbe le consegne di oggi.
 async function oraDelServer(){
   try {
     const r = await fetch(`${SUPABASE_URL}/rest/v1/consegne_turno?select=id&limit=1`,
@@ -2867,13 +2879,38 @@ async function oraDelServer(){
   }
 }
 
+// Lo scarto fra l'orologio del dispositivo e quello del server, misurato una volta all'avvio.
+// Da lì in poi l'ora giusta è adesso(), e la si usa OVUNQUE una scadenza decida qualcosa: la
+// pulizia dell'archivio e la durata dell'accesso di reparto. Prima la seconda si fidava del
+// solo Date.now(), che è la stessa cosa di cui la prima non si fida — su un computer con la
+// data indietro il turno non finiva mai. Misurarlo una volta, e non a ogni controllo, evita
+// una richiesta al minuto per una cosa che si muove di secondi.
+let scartoOrologio = null;   // null = non ancora misurato
+
+async function allineaOrologio(){
+  if(scartoOrologio === null){
+    const t = await oraDelServer();
+    if(t !== null) scartoOrologio = t - Date.now();
+  }
+  return scartoOrologio !== null;
+}
+
+// Regge un orologio fermo su una data sbagliata — il caso vero — perché lo scarto viene dal
+// server e la data d'accesso viene registrata già corretta, quindi resta valida anche dopo un
+// ricaricamento. Non regge un orologio spostato a sessione già aperta: per quello servirebbe
+// un tempo monotono che il browser non offre, e non vale una richiesta di rete al minuto.
+function adesso(){
+  return Date.now() + (scartoOrologio || 0);
+}
+
 async function eliminaConsegneVecchie(){
   if(!sb) return;
-  const adesso = await oraDelServer();
-  if(adesso === null) return;
+  // Se l'ora del server non è mai arrivata non si cancella niente: meglio una consegna di
+  // troppo in archivio che una persa per un orologio sbagliato.
+  if(!await allineaOrologio()) return;
   // Il taglio lo applica il database sulla propria colonna: qui non si sceglie riga per riga
   // che cosa cancellare, si dice solo fin dove.
-  const limite = new Date(adesso - CONSERVAZIONE_MS).toISOString();
+  const limite = new Date(adesso() - CONSERVAZIONE_MS).toISOString();
   const { error } = await sb.from('consegne_turno').delete().lt('creato_il', limite);
   if(error) console.error('Pulizia delle consegne scadute non riuscita:', error);
 }
@@ -3041,6 +3078,11 @@ function saveDraft(){
   draftSaveTimer = setTimeout(() => {
     try {
       localStorage.setItem(DRAFT_KEY, JSON.stringify({
+        // L'unica scadenza che resta su Date.now(), di proposito: scritta e riletta dallo
+        // stesso orologio, la differenza è giusta anche se quell'orologio è su una data
+        // sbagliata. adesso() qui peggiorerebbe le cose — la bozza si salva anche senza rete
+        // (modalità locale), dove lo scarto col server non è mai stato misurato, e la coppia
+        // scrittura/lettura smetterebbe di essere fatta con lo stesso metro.
         salvataIl: Date.now(),
         groups: state,
         manualPieces,
@@ -3143,7 +3185,8 @@ function accessoScaduto(){
   // Nel dubbio si scade: una durata mancante o illeggibile vale come turno, mai come
   // accesso perenne, altrimenti basterebbe cancellare una chiave per non uscire mai.
   const durata = Number(grezzo) || TURNO_MS;
-  return Date.now() - inizio > durata;
+  // adesso(), non Date.now(): il turno finisce sull'ora del server come l'archivio (v. sopra).
+  return adesso() - inizio > durata;
 }
 
 function mostraAccesso(messaggio){
@@ -3223,7 +3266,7 @@ async function entra(){
     return;
   }
   try {
-    localStorage.setItem(ACCESSO_INIZIO_KEY, String(Date.now()));
+    localStorage.setItem(ACCESSO_INIZIO_KEY, String(adesso()));
     localStorage.setItem(ACCESSO_DURATA_KEY, entrato.durata === null ? 'illimitata' : String(entrato.durata));
     localStorage.setItem(ACCESSO_EMAIL_KEY, entrato.email);
   } catch(e){}
@@ -3260,6 +3303,11 @@ async function avvia(){
     document.getElementById('accesso-locale').hidden = false;
     return;
   }
+  // Prima di qualunque scadenza, l'ora giusta: qui sotto si decide se il turno è finito, e
+  // farlo sull'orologio del dispositivo è esattamente ciò che adesso() esiste per evitare.
+  // Se il server non risponde si prosegue lo stesso, con lo scarto a zero: senza rete non si
+  // entra comunque da nessuna parte, e restare fuori per un orologio muto sarebbe peggio.
+  await allineaOrologio();
   let sessione = null;
   try {
     const { data } = await sb.auth.getSession();
