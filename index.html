@@ -610,7 +610,7 @@
       <div class="flags">
         <span class="flag" data-text="secrezioni assenti">Assenti</span>
         <span class="flag" data-text="secrezioni scarse" data-sub="V-aspetto">Scarse</span>
-        <span class="flag" data-text="secrezioni modiche" data-sub="V-aspetto">Modiche</span>
+        <span class="flag" data-text="secrezioni discrete" data-sub="V-aspetto">Discrete</span>
         <span class="flag" data-text="secrezioni abbondanti" data-sub="V-aspetto">Abbondanti</span>
       </div>
       <div class="sub-flags" id="V-aspetto" data-group="V-aspetto-sel" data-mode="checkbox">
@@ -1905,13 +1905,13 @@ function render(){
       });
       aspettoTxt = joinItalian(ordered);
     }
-    // "modiche" vuol dire quantità normale, che è il sottinteso di chiunque legga: scriverlo
+    // "discrete" vuol dire quantità normale, che è il sottinteso di chiunque legga: scriverlo
     // aggiungerebbe una parola senza aggiungere un'informazione. Quel chip serve a dire che
     // le secrezioni ci sono e ad aprire l'aspetto, non a quantificarle, quindi le secrezioni
     // si nominano solo per dirne l'aspetto; se non c'è nemmeno quello resta il solo
     // bronco-aspirato al bisogno. "Scarse" e "abbondanti" invece scostano dalla norma, e
     // vanno dette.
-    if(vSecr === 'secrezioni modiche'){
+    if(vSecr === 'secrezioni discrete'){
       if(aspettoTxt) secrBits.push('secrezioni ' + aspettoTxt);
     } else {
       secrBits.push(vSecr);
