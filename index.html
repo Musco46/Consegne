@@ -1079,6 +1079,14 @@ try {
   console.error('Supabase non disponibile: salvataggio ed elenco consegne disattivati.', e);
 }
 
+// Aperta con un doppio clic sul file invece che dall'indirizzo del sito. Non e' un dettaglio:
+// decide se il codice si puo' chiedere, quando il server non risponde (v. avvia).
+const MODO_LOCALE = location.protocol === 'file:';
+
+// Si sta lavorando senza archivio: nessuna sessione aperta, niente elenco, niente
+// salvataggio. Ci si arriva dai due casi in cui il database e' fuori portata (v. apriLocale).
+let soloLocale = false;
+
 const state = {};
 
 // Consegna attualmente caricata dall'elenco: "Salva" la aggiorna invece di duplicarla.
@@ -2926,7 +2934,10 @@ function segnaSalvato(){
 }
 
 async function saveConsegna(){
-  if(!sb){
+  // 'soloLocale' e' l'altro modo di non avere il database: il client c'e', ma nessuno ha fatto
+  // l'accesso perche' il server non rispondeva. Senza questo controllo il salvataggio partirebbe
+  // lo stesso, per fallire dopo l'attesa di rete con un errore generico.
+  if(!sb || soloLocale){
     alert('Salvataggio non disponibile: manca la connessione al database. La consegna si può comunque copiare.');
     return;
   }
@@ -3102,14 +3113,24 @@ const CONSERVAZIONE_MS = 16 * 24 * 60 * 60 * 1000;
 // L'ora la si chiede al server, mai al dispositivo. Se l'orologio di un computer del reparto
 // fosse avanti di un mese — succede, dopo un cambio di scheda madre o una batteria scarica —
 // una scadenza calcolata sul suo Date.now() cancellerebbe le consegne di oggi.
+// Quanto si aspetta prima di dire che il server non c'e'. Un indirizzo che non esiste fallisce
+// subito, ma una rete che ingoia i pacchetti senza rispondere -- il filtro dell'ospedale -- terrebbe
+// la richiesta appesa per minuti. Questa attesa e' diventata la porta d'ingresso della copia
+// locale: senza un limite, chi apre il file offline resterebbe fermo davanti al codice.
+const SERVER_TIMEOUT_MS = 8000;
+
 async function oraDelServer(){
+  const stop = new AbortController();
+  const scadenza = setTimeout(() => stop.abort(), SERVER_TIMEOUT_MS);
   try {
     const r = await fetch(`${SUPABASE_URL}/rest/v1/consegne_turno?select=id&limit=1`,
-      { method: 'HEAD', headers: { apikey: SUPABASE_KEY } });
+      { method: 'HEAD', headers: { apikey: SUPABASE_KEY }, signal: stop.signal });
     const t = Date.parse(r.headers.get('date') || '');
     return isNaN(t) ? null : t;
   } catch(e){
     return null;
+  } finally {
+    clearTimeout(scadenza);
   }
 }
 
@@ -3572,17 +3593,34 @@ async function avvia(){
   if(!sb){
     // Senza il client Supabase non si può autenticare nessuno, ma nemmeno leggere niente:
     // tutte le consegne stanno nell'archivio, irraggiungibile allo stesso modo. Si può quindi
-    // offrire la sola generazione locale senza esporre dati. La bozza però NON si ripristina:
-    // quella è sul dispositivo e sarebbe l'unica cosa clinica visibile senza codice.
+    // offrire la sola generazione locale senza esporre dati. Qui il tasto resta, e non si
+    // entra da soli: succede anche dall'indirizzo online, dove una pagina che si apre da sé
+    // sembrerebbe un guasto silenzioso invece di uno script che non è arrivato.
     msgAccesso.textContent = 'Archivio non raggiungibile: si può solo scrivere una consegna nuova.';
     document.getElementById('accesso-locale').hidden = false;
     return;
   }
   // Prima di qualunque scadenza, l'ora giusta: qui sotto si decide se il turno è finito, e
   // farlo sull'orologio del dispositivo è esattamente ciò che adesso() esiste per evitare.
-  // Se il server non risponde si prosegue lo stesso, con lo scarto a zero: senza rete non si
-  // entra comunque da nessuna parte, e restare fuori per un orologio muto sarebbe peggio.
-  await allineaOrologio();
+  // Se il server non risponde si prosegue lo stesso, con lo scarto a zero: restare fuori per
+  // un orologio muto sarebbe peggio.
+  const serverRisponde = await allineaOrologio();
+  // Questa richiesta è anche l'unica prova onesta che il server ci sia: navigator.onLine dice
+  // di sì pure attaccati alla rete dell'ospedale che filtra quel dominio, cioè proprio il caso
+  // per cui la copia sul disco esiste.
+  //
+  // Il file aperto col doppio clic è la scorta per quando il sito non si raggiunge. Lì il
+  // codice non si può verificare — è il server a dire se è giusto — quindi chiederlo vorrebbe
+  // dire tenere fuori chi ha bisogno della pagina proprio nel momento in cui gli serve. Si
+  // entra diretti, ma solo per scrivere e copiare.
+  // Se invece il server risponde, il codice si chiede anche al file locale: da lì l'archivio
+  // funziona davvero (stesso database del sito), e saltare l'accesso lo aprirebbe a chiunque
+  // si ritrovi il file sul computer. Dall'indirizzo online non si salta mai: se il server non
+  // risponde, da lì non si apre nemmeno la pagina.
+  if(MODO_LOCALE && !serverRisponde){
+    apriLocale('Server non raggiungibile: questa copia scrive e copia, ma l\'archivio è sul sito.');
+    return;
+  }
   let sessione = null;
   try {
     const { data } = await sb.auth.getSession();
@@ -3599,14 +3637,27 @@ async function avvia(){
   mostraAccesso('');
 }
 
-document.getElementById('accesso-locale').addEventListener('click', () => {
+// Si apre la pagina senza essere entrati da nessuna parte. La bozza NON si ripristina: sta sul
+// dispositivo e sarebbe l'unica cosa clinica visibile senza aver messo il codice.
+// 'appAperta' resta falsa apposta: non c'è nessuna sessione da far scadere, e i due controlli
+// che chiamano esci() — le 12 ore e onAuthStateChange — qui rimetterebbero davanti un codice
+// che in questa modalità non serve a niente.
+function apriLocale(messaggio){
+  soloLocale = true;
   bloccaContenuto(false);
   boxAccesso.classList.add('nascosto');
   // Nessuna sessione da chiudere: qui non si è entrati da nessuna parte, e un tasto "Esci"
   // che non esce da niente si limiterebbe a rimettere davanti un codice che non serve.
   document.getElementById('barra-sessione').hidden = true;
+  // Il messaggio va dove sarebbero state le consegne salvate: è lì che si guarda per cercarle,
+  // ed è lì che deve essere scritto perché non ci sono. Non trovarne traccia da nessuna parte
+  // vorrebbe dire scrivere per un turno intero credendo di star salvando.
   document.getElementById('saved-list').innerHTML =
-    '<p class="saved-empty">Archivio non raggiungibile.</p>';
+    '<p class="saved-empty">' + messaggio + '</p>';
+}
+
+document.getElementById('accesso-locale').addEventListener('click', () => {
+  apriLocale('Archivio non raggiungibile.');
 });
 
 avvia();
