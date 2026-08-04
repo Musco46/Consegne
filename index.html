@@ -186,6 +186,32 @@
     flex-shrink:0;
   }
   .output-header h2{margin:0;font-size:.95rem;}
+  .header-left{display:flex;align-items:center;gap:9px;min-width:0;}
+  /* Sta qui, accanto al titolo, e non fra i tasti sotto: quelli si premono a fine consegna,
+     questo mentre la si scrive, e non deve essere confuso con "Cancella". Piccolo di
+     proposito -- e' una via d'uscita, non un'azione. */
+  .undo-btn{
+    border:none;
+    background:#EEF1F3;
+    color:var(--ink);
+    border-radius:7px;
+    width:27px;
+    height:27px;
+    padding:0;
+    font-family:inherit;
+    font-size:1.05rem;
+    line-height:1;
+    cursor:pointer;
+    flex-shrink:0;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+  }
+  .undo-btn:hover:not(:disabled){background:#E2E6EA;}
+  /* Spento finche' non c'e' niente da annullare: dice da se' se un passo indietro esiste,
+     senza che si debba premerlo per scoprirlo. */
+  .undo-btn:disabled{opacity:.3;cursor:default;}
+  .undo-btn:focus-visible{outline:2px solid var(--n2);outline-offset:2px;}
   .header-actions{display:flex;gap:8px;flex-shrink:0;}
   .toggle-btn{
     border:none;
@@ -281,20 +307,10 @@
     font-weight:600;
     cursor:pointer;
     flex:1;
-    min-width:0;
   }
   button.copy{background:var(--ink);color:white;}
   button.save{background:var(--save);color:white;}
   button.reset{background:#EEF1F3;color:var(--ink);}
-  button.undo{background:#EEF1F3;color:var(--ink);}
-  /* Spento finche' non c'e' niente da annullare: cosi' dice da solo se un passo indietro
-     esiste, senza che si debba premerlo per scoprirlo. */
-  button.act:disabled{opacity:.4;cursor:default;}
-  /* Quattro tasti su una riga sola: sui telefoni stretti si stringono, non vanno a capo. */
-  @media (max-width:420px){
-    button.act{padding:6px 6px;font-size:.78rem;}
-    .actions{gap:6px;}
-  }
   .copied{color:var(--save);font-size:.82rem;margin-left:4px;align-self:center;}
 
   .saved-save-row{
@@ -985,7 +1001,11 @@
 
 <div class="output-wrap" id="output-wrap">
   <div class="output-header" onclick="toggleOutput()">
-    <h2>Consegne RIA</h2>
+    <div class="header-left">
+      <button class="undo-btn" id="undo-btn" type="button" disabled
+              title="Annulla l'ultima modifica" aria-label="Annulla l'ultima modifica">&#8630;</button>
+      <h2>Consegne RIA</h2>
+    </div>
     <div class="header-actions">
       <button class="toggle-btn" id="expand-btn" type="button" onclick="toggleExpand(event)">Estendi</button>
       <button class="toggle-btn" id="toggle-btn" type="button">Nascondi ▼</button>
@@ -1000,7 +1020,6 @@
       <button class="act copy" onclick="copyOutput()">Copia</button>
       <button class="act save" onclick="saveConsegna()">Salva</button>
       <button class="act reset" onclick="resetAll()">Cancella</button>
-      <button class="act undo" id="undo-btn" type="button" disabled>Annulla</button>
       <span class="copied" id="copied-msg" style="display:none;">Copiato ✓</span>
       <span class="copied" id="saved-msg" style="display:none;">Salvata ✓</span>
     </div>
@@ -2586,7 +2605,12 @@ function annulla(){
   aggiornaTastoAnnulla();
 }
 
-document.getElementById('undo-btn').addEventListener('click', annulla);
+// Il tasto sta dentro l'intestazione, che al clic richiude il riquadro: senza fermare qui il
+// clic, annullare chiuderebbe anche la consegna che si sta guardando.
+document.getElementById('undo-btn').addEventListener('click', e => {
+  e.stopPropagation();
+  annulla();
+});
 // Su una tastiera vera Ctrl+Z e' il gesto naturale. Dentro un campo di testo, pero', Ctrl+Z e'
 // l'annulla del browser sul testo che si sta scrivendo: li' si lascia fare a lui.
 document.addEventListener('keydown', e => {
