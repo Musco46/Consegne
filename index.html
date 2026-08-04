@@ -2726,7 +2726,11 @@ async function saveConsegna(){
     // La data mostrata nell'elenco (e l'ordinamento) è quella dell'ULTIMO salvataggio: una
     // consegna aggiornata a fine turno deve dire l'ora in cui è stata scritta davvero, e
     // risalire in cima, non restare ferma all'ora in cui era stata aperta la prima volta.
-    creato_il: new Date().toISOString()
+    // adesso(), non new Date(): è la colonna su cui la pulizia a 16 giorni fa il taglio, e il
+    // taglio lo calcola sull'ora del server. Scritta con l'orologio del dispositivo, una
+    // postazione con la data indietro di un mese avrebbe salvato consegne già scadute in
+    // partenza, cancellate alla prima apertura successiva; una avanti le avrebbe rese eterne.
+    creato_il: new Date(adesso()).toISOString()
   };
   // Se la consegna è stata aperta dall'elenco, "Salva" la aggiorna: prima ogni salvataggio
   // creava una riga nuova, quindi aggiornare una consegna a fine turno la duplicava.
