@@ -1106,10 +1106,20 @@ const MODO_LOCALE = location.protocol === 'file:';
 // casi in cui il database e' fuori portata (v. apriLocale).
 let soloLocale = false;
 
-// La schermata del codice sta chiedendo di aprire l'archivio offline, non di entrare in Supabase:
-// e' lo stesso codice, ma a verificarlo non c'e' nessun server (v. sbloccaOffline).
-let sbloccoOffline = false;
-// Quando e' stato aperto, per richiuderlo dopo un po' (v. SBLOCCO_LOCALE_MS).
+// A quale domanda risponde il codice che si sta digitando. E' lo stesso codice in tutti i casi,
+// ma chi lo verifica no, e sbagliare interlocutore e' esattamente il guasto che c'e' stato:
+//   'attesa'   nessuna domanda ancora, si sta provando il server -- il campo resta chiuso
+//   'supabase' accesso normale, lo verifica il server
+//   'offline'  apre l'archivio cifrato di questo computer (v. sbloccaOffline)
+//   'nuovo'    lo sta scegliendo adesso, senza rete e senza server (v. impostaCodiceLocale)
+//   'nessuno'  nessun codice servirebbe a niente -- il campo resta chiuso
+let modoAccesso = 'attesa';
+// Il primo dei due inserimenti quando il codice si sta scegliendo.
+let codiceInAttesa = null;
+// Cresce a ogni tentativo verso Supabase: un esito che torna quando ne e' gia' partito un altro,
+// o quando la domanda e' cambiata, e' vecchio e non deve toccare la pagina.
+let tentativoAccesso = 0;
+// Quando e' stato aperto l'archivio offline, per richiuderlo dopo un po' (v. SBLOCCO_LOCALE_MS).
 let sbloccatoIl = 0;
 
 const state = {};
@@ -3287,22 +3297,23 @@ async function apriChiaveDati(codice){
   }
 }
 
-// Chiamata dopo un accesso online riuscito, e solo da lì: è l'unico momento in cui si sa che il
-// codice è davvero quello giusto, perché a dirlo è stato il server. Un codice preso per buono
-// offline sarebbe un refuso promosso a password, con l'archivio chiuso dentro.
+// Chiude il codice attorno all'archivio di questo computer. La chiama un accesso online riuscito
+// — dove il codice l'ha appena confermato il server — oppure, su un computer che la rete non ce
+// l'ha, la scelta a doppia digitazione di impostaCodiceLocale. Torna vero se da qui in poi
+// l'archivio è aperto.
 async function armaChiaveLocale(codice){
-  if(!MODO_LOCALE || !crypto.subtle) return;
+  if(!MODO_LOCALE || !crypto.subtle) return false;
   try {
     // Se il codice apre già la cassetta non si tocca niente: rifarla con una chiave nuova
     // renderebbe illeggibile tutto quello che c'è scritto finora.
     const esistente = await apriChiaveDati(codice);
-    if(esistente){ chiaveDati = esistente; return; }
+    if(esistente){ chiaveDati = esistente; return true; }
     // C'è una cassetta che questo codice non apre: è l'altro profilo, o il codice di prima. Il
     // dispositivo resta di chi ce l'ha chiusa — riscriverla butterebbe via consegne che qualcun
     // altro può ancora riaprire, e che comunque scadono da sole.
     if(chiaveArmata()){
       console.warn('Archivio offline già chiuso con un altro codice: lasciato com\'è.');
-      return;
+      return false;
     }
     const salt = crypto.getRandomValues(new Uint8Array(16));
     const grezza = crypto.getRandomValues(new Uint8Array(32));
@@ -3316,8 +3327,10 @@ async function armaChiaveLocale(codice){
     if(vecchie && vecchie.trimStart().startsWith('[')){
       try { await scriviLocali(JSON.parse(vecchie)); } catch(e){}
     }
+    return true;
   } catch(e){
     console.error('Non è stato possibile preparare l\'archivio offline:', e);
+    return false;
   }
 }
 
@@ -3707,6 +3720,13 @@ function bloccaContenuto(bloccato){
   if(contenutoApp) contenutoApp.inert = bloccato;
 }
 bloccaContenuto(true);
+// Il campo del codice nasce chiuso, e resta chiuso finché avvia() non ha deciso QUALE codice si
+// sta chiedendo. Prima era aperto da subito: chi digitava durante gli otto secondi in cui si
+// aspetta il server mandava il codice a Supabase — cioè al posto irraggiungibile — e la risposta
+// di quel tentativo, arrivando tardi, rimetteva davanti la schermata a chi nel frattempo era
+// entrato. È il motivo per cui esisteva 'modoAccesso' più in basso: qui si chiude la porta.
+campoCodice.disabled = true;
+btnAccesso.disabled = true;
 
 function accessoScaduto(){
   let inizio = 0, grezzo = null;
@@ -3729,7 +3749,13 @@ function mostraAccesso(messaggio){
   boxAccesso.classList.remove('nascosto');
   msgAccesso.textContent = messaggio || '';
   campoCodice.value = '';
-  campoCodice.focus();
+  // Si può rispondere solo a una domanda che è già stata scelta. 'attesa' e 'nessuno' non sono
+  // domande: nella prima non si sa ancora se il server c'è, nella seconda non c'è nessun codice
+  // che possa servire a qualcosa.
+  const chiedibile = modoAccesso === 'supabase' || modoAccesso === 'offline' || modoAccesso === 'nuovo';
+  campoCodice.disabled = !chiedibile;
+  btnAccesso.disabled = !chiedibile;
+  if(chiedibile) campoCodice.focus();
 }
 
 async function apriApp(){
@@ -3772,8 +3798,12 @@ async function esci(messaggio, pulisci){
   dimenticaTutto();
   if(sb){ try { await sb.auth.signOut(); } catch(e){} }
   document.getElementById('saved-list').innerHTML = '<p class="saved-empty">Caricamento...</p>';
+  // Da qui si esce solo quando il server c'è: la domanda torna a essere quella normale.
+  modoAccesso = 'supabase';
   mostraAccesso(messaggio);
 }
+
+const MSG_OFFLINE = 'Server non raggiungibile: archivio offline. Le consegne salvate restano solo su questo computer.';
 
 // Offline il codice non si confronta con niente: si prova ad aprirci l'archivio. Se si apre era
 // quello giusto, e non c'è nessun "sì" da falsificare cancellando una riga di questo file.
@@ -3788,16 +3818,48 @@ async function sbloccaOffline(codice){
   }
   chiaveDati = chiave;
   sbloccatoIl = Date.now();
-  sbloccoOffline = false;
   msgAccesso.textContent = '';
-  apriLocale('Server non raggiungibile: archivio offline. Le consegne salvate restano solo su questo computer.');
+  apriLocale(MSG_OFFLINE);
+}
+
+// Primo avvio su un computer che la rete non ce l'ha e forse non l'avrà mai. Qui il codice non
+// lo può confermare nessuno, quindi lo si chiede due volte: due battute uguali non sono una
+// verifica, ma tolgono di mezzo il refuso, che è l'unico modo realistico di chiudere l'archivio
+// con un codice che poi non si sa più. Va messo lo stesso codice di reparto: così, se un giorno
+// quel computer vedrà la rete, sarà già quello giusto.
+async function impostaCodiceLocale(codice){
+  if(codiceInAttesa === null){
+    codiceInAttesa = codice;
+    mostraAccesso('Ripeti lo stesso codice per confermarlo.');
+    return;
+  }
+  const primo = codiceInAttesa;
+  codiceInAttesa = null;
+  if(codice !== primo){
+    mostraAccesso('I due codici non coincidono. Reinseriscilo.');
+    return;
+  }
+  btnAccesso.disabled = true;
+  msgAccesso.textContent = 'Preparazione...';
+  const fatto = await armaChiaveLocale(codice);
+  btnAccesso.disabled = false;
+  if(!fatto){
+    mostraAccesso('Non è stato possibile preparare l\'archivio su questo computer.');
+    return;
+  }
+  sbloccatoIl = Date.now();
+  modoAccesso = 'offline';
+  msgAccesso.textContent = '';
+  apriLocale(MSG_OFFLINE);
 }
 
 async function entra(){
   const codice = campoCodice.value.trim();
   if(!codice) return;
-  if(sbloccoOffline){ await sbloccaOffline(codice); return; }
-  if(!sb) return;
+  if(modoAccesso === 'nuovo'){ await impostaCodiceLocale(codice); return; }
+  if(modoAccesso === 'offline'){ await sbloccaOffline(codice); return; }
+  if(modoAccesso !== 'supabase' || !sb) return;
+  const mioTentativo = ++tentativoAccesso;
   btnAccesso.disabled = true;
   msgAccesso.textContent = '';
 
@@ -3820,6 +3882,14 @@ async function entra(){
     }
   }
 
+  // Su una rete che filtra, questa richiesta può metterci molto più degli otto secondi entro cui
+  // avvia() decide che il server non c'è. Nel frattempo la pagina può essere passata all'archivio
+  // offline, e chi ci era entrato non deve vedersi rimettere davanti la schermata da un tentativo
+  // di cui non sa più niente. Un esito vecchio si butta, in silenzio.
+  if(mioTentativo !== tentativoAccesso || modoAccesso !== 'supabase'){
+    console.warn('Esito di accesso arrivato tardi: ignorato.');
+    return;
+  }
   btnAccesso.disabled = false;
   if(!entrato){
     // Nessun dettaglio sul perché, e nemmeno quale dei due codici fosse quasi giusto: a chi
@@ -3858,7 +3928,7 @@ const SBLOCCO_LOCALE_MS = 4 * 60 * 60 * 1000;
 function bloccaOffline(messaggio){
   chiaveDati = null;
   sbloccatoIl = 0;
-  sbloccoOffline = true;
+  modoAccesso = 'offline';
   // Come a fine turno online: la bozza muore, e la cronologia dell'annulla non deve poter
   // riportare in pagina la consegna di chi c'era prima. Quello che è rimasto scritto resta,
   // coperto dalla schermata del codice.
@@ -3893,6 +3963,7 @@ async function avvia(){
     // offrire la sola generazione locale senza esporre dati. Qui il tasto resta, e non si
     // entra da soli: succede anche dall'indirizzo online, dove una pagina che si apre da sé
     // sembrerebbe un guasto silenzioso invece di uno script che non è arrivato.
+    modoAccesso = 'nessuno';
     msgAccesso.textContent = 'Archivio non raggiungibile: si può solo scrivere una consegna nuova.';
     document.getElementById('accesso-locale').hidden = false;
     return;
@@ -3906,26 +3977,32 @@ async function avvia(){
   // di sì pure attaccati alla rete dell'ospedale che filtra quel dominio, cioè proprio il caso
   // per cui la copia sul disco esiste.
   //
-  // Il file aperto col doppio clic è la scorta per quando il sito non si raggiunge. Lì il
-  // codice non si può verificare — è il server a dire se è giusto — quindi chiederlo vorrebbe
-  // dire tenere fuori chi ha bisogno della pagina proprio nel momento in cui gli serve. Si
-  // entra diretti, e quello che si salva resta sul disco (v. l'archivio su questo disco).
-  // Se invece il server risponde, il codice si chiede anche al file locale: da lì l'archivio
-  // funziona davvero (stesso database del sito), e saltare l'accesso lo aprirebbe a chiunque
-  // si ritrovi il file sul computer. Dall'indirizzo online non si salta mai: se il server non
-  // risponde, da lì non si apre nemmeno la pagina.
+  // Il file aperto col doppio clic è la scorta per quando il sito non si raggiunge, e da lì il
+  // codice apre l'archivio di quel computer invece di essere verificato dal server. Se il server
+  // risponde, invece, il codice torna a essere quello normale anche per il file locale: da lì
+  // l'archivio vero funziona (stesso database del sito), e saltare l'accesso lo aprirebbe a
+  // chiunque si ritrovi il file sul computer. Dall'indirizzo online non si salta mai: se il
+  // server non risponde, da lì non si apre nemmeno la pagina.
   if(MODO_LOCALE && !serverRisponde){
-    // Il codice si può chiedere anche qui, ma solo se questo computer è già stato aperto una
-    // volta con la rete: è lì che il codice viene chiuso attorno all'archivio (v.
-    // armaChiaveLocale). Senza quel passaggio non c'è niente da verificare e niente da
-    // proteggere — l'archivio offline non esiste ancora — e chiedere un codice che nessuno può
-    // dire giusto vorrebbe dire solo tenere fuori chi ha bisogno della pagina.
-    if(chiaveArmata()){
-      sbloccoOffline = true;
-      mostraAccesso('Server non raggiungibile: inserisci il codice per aprire l\'archivio offline.');
+    // Il codice si chiede anche qui. Non c'è nessun server a dire se è giusto, ma non serve:
+    // apre l'archivio o non lo apre. Su un computer di reparto che la rete non ce l'ha e non
+    // l'avrà mai, la prima volta il codice si sceglie sul posto (v. impostaCodiceLocale) — legare
+    // quel primo passaggio a una connessione voleva dire lasciare senza archivio proprio le
+    // postazioni che ne hanno più bisogno.
+    if(!crypto.subtle){
+      // Nessuna cifratura possibile: un codice qui sarebbe una porta finta davanti a dati in
+      // chiaro, e chiederlo direbbe una cosa non vera.
+      modoAccesso = 'nessuno';
+      apriLocale('Server non raggiungibile: si può scrivere e copiare, ma questo browser non permette di tenere un archivio su questo computer.');
       return;
     }
-    apriLocale('Server non raggiungibile: si può scrivere e copiare. Per avere anche l\'archivio offline, apri questo file una volta con la rete e inserisci il codice.');
+    if(chiaveArmata()){
+      modoAccesso = 'offline';
+      mostraAccesso('Server non raggiungibile: inserisci il codice per aprire l\'archivio offline.');
+    } else {
+      modoAccesso = 'nuovo';
+      mostraAccesso('Primo avvio senza rete su questo computer: scegli il codice che aprirà l\'archivio. Usa il codice di reparto.');
+    }
     return;
   }
   let sessione = null;
@@ -3942,6 +4019,8 @@ async function avvia(){
   // essere portate in archivio.
   const daRiaprire = MODO_LOCALE && chiaveArmata() && archivioLocalePresente() && !chiaveDati;
   if(sessione && !accessoScaduto() && !daRiaprire){ apriApp(); return; }
+  // Da qui in poi il server c'è e a verificare il codice torna lui, in tutti i casi.
+  modoAccesso = 'supabase';
   if(sessione && daRiaprire){
     mostraAccesso('Ci sono consegne salvate offline su questo computer: inserisci il codice per riaprirle.');
     return;
