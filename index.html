@@ -682,17 +682,20 @@
         <span class="flag" data-text="presente">Presente</span>
         </div>
       </div>
-      <!-- Niente "normoteso": lo dice gia' "stabile", e un chip che ripete la scelta di sopra
-           si accende per abitudine. Qui si sceglie solo quando la pressione scosta. -->
+      <!-- Chip e testo dicono la stessa cosa con due registri, e sono volutamente incrociati:
+           si clicca il nome del quadro ("Iperteso") e in consegna esce la misura di quel quadro
+           ("tendente all'ipertensione"), che e' piu' prudente; si clicca "Lieve ipertensione" e
+           esce "lievemente iperteso". Chi cerca il chip pensa alla diagnosi, chi legge la
+           consegna vuole il grado: non e' un refuso, non va "corretto" allineando le due colonne.
+           Niente "normoteso": lo dice gia' "stabile", e un chip che ripete la scelta di sopra si
+           accende per abitudine. Qui si sceglie solo quando la pressione scosta. -->
       <div class="sub-flags" id="C-pressione" data-group="C-pressione-sel" data-mode="radio">
         <div class="sub-label">Pressione</div>
         <div class="sub-flags-inner">
-        <span class="flag" data-text="iperteso">Iperteso</span>
-        <span class="flag" data-text="lievemente iperteso">Lievemente iperteso</span>
-        <span class="flag" data-text="tendente all'ipertensione">Tendente all'ipertensione</span>
-        <span class="flag" data-text="ipoteso">Ipoteso</span>
-        <span class="flag" data-text="lievemente ipoteso">Lievemente ipoteso</span>
-        <span class="flag" data-text="tendente all'ipotensione">Tendente all'ipotensione</span>
+        <span class="flag" data-text="tendente all'ipertensione">Iperteso</span>
+        <span class="flag" data-text="lievemente iperteso">Lieve ipertensione</span>
+        <span class="flag" data-text="tendente all'ipotensione">Ipoteso</span>
+        <span class="flag" data-text="lievemente ipoteso">Lieve ipotensione</span>
         </div>
       </div>
     </div>
@@ -804,7 +807,11 @@
       </div>
     </div>
 
-    <div class="sub-flags as-group" id="U-ristagno-cat" data-group="U-ristagno-sel" data-mode="radio">
+    <!-- A scelta multipla: aria e materiale si trovano insieme, e prima scegliere l'una spegneva
+         l'altro. I data-text restano frasi intere e non aggettivi ("ristagno biliare", non
+         "biliare") perche' sono anche la chiave con cui le consegne gia' salvate riaccendono i
+         chip: la composizione la fa chi scrive la frase, togliendo il "ristagno" di troppo. -->
+    <div class="sub-flags as-group" id="U-ristagno-cat" data-group="U-ristagno-sel" data-mode="checkbox">
       <div class="sub-label">Ristagno</div>
       <div class="sub-flags-inner">
       <span class="flag" data-text="ristagno alimentare">Alimentare</span>
@@ -1396,6 +1403,10 @@ document.addEventListener('keydown', e => {
 // questo vincolo si poteva produrre "in nutrizione enterale tramite SNG, a digiuno".
 const DIGIUNO = 'a digiuno';
 const NUTRIZIONE_ENTERALE = 'in nutrizione enterale';
+// L'aria e' un ristagno a parte, in due punti: non toglie il "ben tollerata" alla nutrizione, e
+// nella frase e' sempre abbondante. Sta qui perche' quei due punti sono lontani fra loro, e un
+// data-text ricopiato a mano in entrambi si scollerebbe dal chip alla prima rilettura.
+const RISTAGNO_ARIA = 'ristagno di aria';
 const ACCESSO_STATO_GROUPS = ['U-sng-stato', 'U-gastro-stato', 'U-nava-stato'];
 
 function setFlagOff(groupName, text){
@@ -2127,7 +2138,9 @@ function render(){
     if(nutrizioneDevices.length){
       // Se non è stato indicato un ristagno, la nutrizione si dà per ben tollerata; quando
       // invece c'è, lo dice già la frase del Ristagno poco più sotto.
-      const ristagnoScelto = !!(state['U-ristagno-sel'] && state['U-ristagno-sel'][0]);
+      // L'aria non conta: è aerofagia, non cibo che non scende, e da sola la nutrizione resta
+      // ben tollerata. Solo un ristagno di materiale toglie quella parola.
+      const ristagnoScelto = (state['U-ristagno-sel'] || []).some(t => t !== RISTAGNO_ARIA);
       displayArr.push('in NE tramite ' + joinItalian(nutrizioneDevices.map(d => d.label))
         + (ristagnoScelto ? '' : ', ben tollerata'));
     }
@@ -2162,8 +2175,25 @@ function render(){
   // Il ristagno è una categoria unica condivisa tra tutti gli accessi presenti (non
   // tracciato per singolo dispositivo), visibile non appena almeno un accesso è selezionato.
   if((state['U-via-enterale-sel'] || []).length){
-    const ristagnoTxt = state['U-ristagno-sel'] && state['U-ristagno-sel'][0];
-    if(ristagnoTxt){
+    const ristagni = state['U-ristagno-sel'] || [];
+    if(ristagni.length){
+      const materiali = ristagni.filter(t => t !== RISTAGNO_ARIA);
+      const conAria = ristagni.includes(RISTAGNO_ARIA);
+      // L'aria è sempre abbondante, per come viene segnalata: se non è abbondante non la si
+      // scrive nemmeno, quindi l'aggettivo non è una scelta da lasciare a un chip in più.
+      let ristagnoTxt;
+      if(materiali.length){
+        // Una sola lista, e un solo "ristagno" davanti a tutto: "ristagno alimentare, biliare e
+        // abbondante aria". Tenendo l'aria in un pezzo suo si finiva con due "e" di fila —
+        // "alimentare e biliare e abbondante aria" — perché entrambe le liste ci mettevano il
+        // loro. Qui l'aria è una voce come le altre, e la congiunzione la mette solo l'ultima.
+        const voci = materiali.map(t => t.replace('ristagno ', ''));
+        if(conAria) voci.push('abbondante aria');
+        ristagnoTxt = 'ristagno ' + joinItalian(voci);
+      } else {
+        // Da sola l'aria tiene il suo "ristagno": è lì che dice di che cosa si sta parlando.
+        ristagnoTxt = 'abbondante ristagno di aria';
+      }
       const ristagnoQta = document.getElementById('ristagno-qta-val').value;
       const qtySuffix = ristagnoQta ? ` (${ristagnoQta} ml)` : '';
       uParts.push({ pieceKey: 'U-ristagno', text: mark(sourceMatches('U-ristagno-sel', 'ristagno-qta-val'), 'presenta ' + ristagnoTxt + qtySuffix) });
