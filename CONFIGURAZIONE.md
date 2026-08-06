@@ -1,7 +1,7 @@
 # Configurazione dell'accesso
 
 Il sito è pubblico (Vercel, `consegneturno.vercel.app`) e la chiave Supabase che sta in
-`index.html` è **pubblicabile per progetto**: non è un segreto e non protegge nulla. La
+`consegne.html` è **pubblicabile per progetto**: non è un segreto e non protegge nulla. La
 protezione sono le policy della tabella.
 
 > **Il progetto Supabase è condiviso con un altro sito.** In Supabase la lista utenti è unica
@@ -31,7 +31,7 @@ consegne. Cambia solo per quanto tempo la sessione resta aperta sul dispositivo 
 decide l'app, non Supabase.
 
 **Crearli subito.** Finché non esistono, quegli indirizzi sono liberi: sono scritti in
-`index.html`, che è pubblico, e chi li registrasse per primo si troverebbe in mano l'accesso.
+`consegne.html`, che è pubblico, e chi li registrasse per primo si troverebbe in mano l'accesso.
 
 ## 2. Le policy della tabella
 
@@ -141,7 +141,21 @@ vale una richiesta di rete al minuto.
 Il prezzo è che la pulizia avviene solo quando qualcuno apre l'app. In un reparto vuol dire
 ogni turno, che per una scadenza di sedici giorni basta e avanza.
 
-Per cambiare la durata si tocca `CONSERVAZIONE_MS` in `index.html`, e nient'altro.
+Per cambiare la durata si tocca `CONSERVAZIONE_MS` in `consegne.html`, e nient'altro.
+
+## La pagina si chiama `consegne.html`, e `vercel.json` tiene in piedi la radice
+
+Il nome è per la copia sul disco: fra i file di un computer di reparto `index.html` non dice
+niente a nessuno, `consegne.html` sì. È quella copia che si apre con un doppio clic quando il
+server non si raggiunge, e va riconosciuta a colpo d'occhio.
+
+Il prezzo è che Vercel serve la radice di un sito statico **solo** se trova un `index.html`:
+senza altro, `consegneturno.vercel.app/` risponderebbe 404 e l'indirizzo da ricordare
+diventerebbe `.../consegne.html`. A tenerlo in piedi c'è `vercel.json`, che riscrive `/` su
+`/consegne.html` — la pagina è la stessa, cambia solo quale file va a prendere.
+
+Quindi: se un giorno il file cambia nome di nuovo, si cambia anche quella riga, o il sito si
+apre solo scrivendo il nome del file per esteso.
 
 ## La libreria Supabase sta nel repo
 
@@ -174,7 +188,7 @@ tar -xzf "$env:TEMP\sb.tgz" -C "$env:TEMP"
 Copy-Item "$env:TEMP\package\dist\umd\supabase.js" ".\vendor\supabase-js-$v.umd.js"
 ```
 
-Poi si aggiorna l'unico `<script src="vendor/...">` in `index.html` con il nome nuovo, si
+Poi si aggiorna l'unico `<script src="vendor/...">` in `consegne.html` con il nome nuovo, si
 cancella il file vecchio e si prova a entrare: se la libreria non si carica l'app lo dice da
 sé ("Archivio non raggiungibile") invece di rompersi in silenzio.
 
