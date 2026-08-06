@@ -3314,6 +3314,13 @@ async function eliminaConsegneVecchie(){
 // problema dove sta davvero, cioè sui dati.
 const LOCALI_KEY = 'consegne-locali';
 const CHIAVE_KEY = 'consegne-chiave-locale';
+// L'archivio aperto sopravvive a una ricarica, ma non alla chiusura del file. Sta in
+// sessionStorage e non in localStorage, ed e' tutta la differenza: il browser lo tiene per
+// QUELLA scheda e lo butta quando la si chiude. Cosi' ricaricare non richiede il codice —
+// ricaricare non e' cambiare turno — mentre chi apre il file domani lo trova chiuso. In
+// localStorage la chiave finirebbe sul disco accanto alle consegne che cifra, e a quel punto
+// cifrarle non proteggerebbe piu' da nessuno.
+const SBLOCCO_KEY = 'consegne-sblocco-locale';
 // Il prefisso distingue a colpo d'occhio un id nostro da un UUID di Supabase, ed è l'unica cosa
 // che dice, ovunque, se una consegna vive sul disco o sul database.
 const LOCALE_PREFIX = 'locale-';
@@ -3322,8 +3329,7 @@ const idLocale = id => String(id || '').startsWith(LOCALE_PREFIX);
 // cioè niente per chi apre l'archivio una volta a turno.
 const PBKDF2_ITER = 600000;
 
-// Aperta finché la pagina resta aperta, e mai scritta da nessuna parte: chiudere il file
-// richiude l'archivio. Null = chiuso a chiave.
+// Aperta finché la scheda resta aperta. Null = chiuso a chiave.
 let chiaveDati = null;
 
 const inB64 = buf => btoa(String.fromCharCode.apply(null, new Uint8Array(buf)));
@@ -3362,16 +3368,57 @@ const chiaveArmata = () => !!leggiScrigno();
 // La chiave che cifra davvero le consegne è casuale e non deriva dal codice: il codice chiude
 // soltanto la cassetta in cui sta. Così cambiare codice non obbliga a ricifrare l'archivio, e
 // un codice sbagliato non apre la cassetta invece di "non superare un controllo".
+// Torna la chiave insieme ai suoi byte in chiaro: quelli servono a ricordare l'archivio aperto
+// per la durata della scheda (v. apriArchivioLocale), e da una CryptoKey non si riestraggono.
 async function apriChiaveDati(codice){
   const scrigno = leggiScrigno();
   if(!scrigno) return null;
   try {
     const chiusura = await chiaveDaCodice(codice, daB64(scrigno.salt));
-    const grezza = daB64(await decifra(chiusura, scrigno));
-    return await crypto.subtle.importKey('raw', grezza, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
+    const grezzaB64 = await decifra(chiusura, scrigno);
+    return {
+      chiave: await crypto.subtle.importKey('raw', daB64(grezzaB64), { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']),
+      grezzaB64
+    };
   } catch(e){
     // AES-GCM rifiuta di decifrare con la chiave sbagliata: è questo il "codice non valido"
     return null;
+  }
+}
+
+// Da qui in poi l'archivio è aperto, e lo resta anche dopo una ricarica.
+function apriArchivioLocale(chiave, grezzaB64, quando){
+  chiaveDati = chiave;
+  sbloccatoIl = quando;
+  try {
+    sessionStorage.setItem(SBLOCCO_KEY, JSON.stringify({ chiave: grezzaB64, sbloccatoIl }));
+  } catch(e){
+    // storage negato: si lavora comunque, solo che una ricarica richiederà di nuovo il codice
+  }
+}
+
+function dimenticaSblocco(){
+  try { sessionStorage.removeItem(SBLOCCO_KEY); } catch(e){}
+}
+
+// Ricaricare la pagina non è cambiare turno: se questa scheda aveva già aperto l'archivio, si
+// riprende da dove era. Le quattro ore però continuano a contare da quando è stato aperto la
+// prima volta, non da questa ricarica — altrimenti basterebbe premere F5 per non uscire mai.
+async function riprendiSblocco(){
+  let v = null;
+  try { v = JSON.parse(sessionStorage.getItem(SBLOCCO_KEY) || 'null'); } catch(e){}
+  if(!v || !v.chiave) return false;
+  if(!v.sbloccatoIl || Date.now() - v.sbloccatoIl > SBLOCCO_LOCALE_MS){
+    dimenticaSblocco();
+    return false;
+  }
+  try {
+    const chiave = await crypto.subtle.importKey('raw', daB64(v.chiave), { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
+    apriArchivioLocale(chiave, v.chiave, v.sbloccatoIl);
+    return true;
+  } catch(e){
+    dimenticaSblocco();
+    return false;
   }
 }
 
@@ -3385,7 +3432,10 @@ async function armaChiaveLocale(codice){
     // Se il codice apre già la cassetta non si tocca niente: rifarla con una chiave nuova
     // renderebbe illeggibile tutto quello che c'è scritto finora.
     const esistente = await apriChiaveDati(codice);
-    if(esistente){ chiaveDati = esistente; return true; }
+    if(esistente){
+      apriArchivioLocale(esistente.chiave, esistente.grezzaB64, Date.now());
+      return true;
+    }
     // C'è una cassetta che questo codice non apre: è l'altro profilo, o il codice di prima. Il
     // dispositivo resta di chi ce l'ha chiusa — riscriverla butterebbe via consegne che qualcun
     // altro può ancora riaprire, e che comunque scadono da sole.
@@ -3398,7 +3448,9 @@ async function armaChiaveLocale(codice){
     const chiusura = await chiaveDaCodice(codice, salt);
     const blob = await cifra(chiusura, inB64(grezza));
     localStorage.setItem(CHIAVE_KEY, JSON.stringify({ salt: inB64(salt), iv: blob.iv, ct: blob.ct }));
-    chiaveDati = await crypto.subtle.importKey('raw', grezza, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
+    apriArchivioLocale(
+      await crypto.subtle.importKey('raw', grezza, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']),
+      inB64(grezza), Date.now());
     // Quello che era stato salvato in chiaro dalla versione precedente passa sotto chiave adesso,
     // invece di restare leggibile accanto a dati che non lo sono più.
     const vecchie = localStorage.getItem(LOCALI_KEY);
@@ -3909,9 +3961,10 @@ async function esci(messaggio, pulisci){
   } catch(e){}
   appAperta = false;
   // Si sta consegnando il computer a qualcun altro: anche l'archivio offline torna illeggibile,
-  // non solo nascosto.
+  // non solo nascosto, e non deve tornare aperto da sé alla prima ricarica.
   chiaveDati = null;
   sbloccatoIl = 0;
+  dimenticaSblocco();
   if(pulisci) resetAll();
   // La bozza muore con il turno, SEMPRE — anche quando la pagina resta com'è, cioè alla
   // scadenza delle 12 ore. Chi rientra col codice sta cominciando un turno nuovo: se si
@@ -3936,14 +3989,13 @@ const MSG_OFFLINE = 'Server non raggiungibile: archivio offline. Le consegne sal
 async function sbloccaOffline(codice){
   btnAccesso.disabled = true;
   msgAccesso.textContent = 'Apertura...';
-  const chiave = await apriChiaveDati(codice);
+  const aperta = await apriChiaveDati(codice);
   btnAccesso.disabled = false;
-  if(!chiave){
+  if(!aperta){
     mostraAccesso('Codice non valido.');
     return;
   }
-  chiaveDati = chiave;
-  sbloccatoIl = Date.now();
+  apriArchivioLocale(aperta.chiave, aperta.grezzaB64, Date.now());
   msgAccesso.textContent = '';
   apriLocale(MSG_OFFLINE);
 }
@@ -3975,7 +4027,8 @@ async function impostaCodiceLocale(codice){
     mostraAccesso('Non è stato possibile preparare l\'archivio su questo computer.');
     return;
   }
-  sbloccatoIl = Date.now();
+  // sbloccatoIl e il ricordo per la ricarica li ha già messi armaChiaveLocale, che è il posto
+  // dove l'archivio si apre per davvero (v. apriArchivioLocale).
   decisoAccesso('offline');
   msgAccesso.textContent = '';
   apriLocale(MSG_OFFLINE);
@@ -4069,6 +4122,8 @@ const SBLOCCO_LOCALE_MS = 4 * 60 * 60 * 1000;
 function bloccaOffline(messaggio){
   chiaveDati = null;
   sbloccatoIl = 0;
+  // Se restasse, una ricarica riaprirebbe quello che le quattro ore hanno appena chiuso.
+  dimenticaSblocco();
   decisoAccesso('offline');
   // Come a fine turno online: la bozza muore, e la cronologia dell'annulla non deve poter
   // riportare in pagina la consegna di chi c'era prima. Quello che è rimasto scritto resta,
@@ -4160,6 +4215,14 @@ async function avvia(){
       // chiaro, e chiederlo direbbe una cosa non vera.
       decisoAccesso('nessuno');
       apriLocale('Server non raggiungibile: si può scrivere e copiare, ma questo browser non permette di tenere un archivio su questo computer.');
+      return;
+    }
+    // Ricaricare non è cambiare turno: se questa scheda aveva già aperto l'archivio, si rientra
+    // senza ridigitare niente. Le quattro ore le controlla riprendiSblocco, e contano da quando
+    // è stato aperto la prima volta.
+    if(chiaveArmata() && await riprendiSblocco()){
+      decisoAccesso('offline');
+      apriLocale(MSG_OFFLINE);
       return;
     }
     if(chiaveArmata()){
