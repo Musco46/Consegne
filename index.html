@@ -3292,12 +3292,6 @@ function leggiScrigno(){
 // provare ad aprirla è la verifica. Senza, offline non c'è niente da chiedere a nessuno.
 const chiaveArmata = () => !!leggiScrigno();
 
-// C'è qualcosa scritto sul disco, aperto o no. Serve a sapere se vale la pena chiedere il codice
-// quando la rete c'è ma la sessione basterebbe da sola (v. avvia).
-function archivioLocalePresente(){
-  try { return !!localStorage.getItem(LOCALI_KEY); } catch(e){ return false; }
-}
-
 // La chiave che cifra davvero le consegne è casuale e non deriva dal codice: il codice chiude
 // soltanto la cassetta in cui sta. Così cambiare codice non obbliga a ricifrare l'archivio, e
 // un codice sbagliato non apre la cassetta invece di "non superare un controllo".
@@ -4094,13 +4088,14 @@ async function avvia(){
   } catch(e){
     console.error('Sessione non leggibile:', e);
   }
-  // Con una sessione ancora valida di solito non si chiede niente. Ma se su questo computer c'è
-  // un archivio offline chiuso a chiave, la sessione da sola non lo apre: la chiave sta dietro al
-  // codice, e il codice qui non l'ha digitato nessuno. Senza questo passaggio le consegne scritte
-  // senza rete resterebbero invisibili proprio quando la rete torna, cioè quando servono per
-  // essere portate in archivio.
-  const daRiaprire = MODO_LOCALE && chiaveArmata() && archivioLocalePresente() && !chiaveDati;
-  if(sessione && !accessoScaduto() && !daRiaprire){
+  // Con una sessione ancora valida non si chiede niente, e basta. C'era un caso in più: se su
+  // questo computer c'era un archivio offline chiuso a chiave, il codice si chiedeva comunque,
+  // perché la chiave sta dietro a quello e la sessione da sola non lo apre. Ma era un codice
+  // chiesto a chi non l'aveva chiesto, per un archivio che quasi sempre non c'è: le postazioni
+  // che scrivono offline sono quelle senza rete, e lì una sessione non esiste. Chi ha entrambe le
+  // cose rivede le sue consegne offline la prima volta che il codice glielo si chiede per un
+  // motivo vero — turno scaduto, o "Esci" — e nel frattempo restano sul disco, cifrate.
+  if(sessione && !accessoScaduto()){
     // La pagina si apre da sé, ma la decisione va comunicata comunque: se qualcuno ha digitato il
     // codice mentre si aspettava, la sua battuta è appesa a questa promessa e resterebbe appesa
     // per sempre. Ad accorgersi che non serve più ci pensa entra(), che vede la pagina già aperta.
@@ -4110,10 +4105,6 @@ async function avvia(){
   }
   // Da qui in poi il server c'è e a verificare il codice torna lui, in tutti i casi.
   decisoAccesso('supabase');
-  if(sessione && daRiaprire){
-    mostraAccesso('Ci sono consegne salvate offline su questo computer: inserisci il codice per riaprirle.');
-    return;
-  }
   if(sessione){
     try { await sb.auth.signOut(); } catch(e){}
     mostraAccesso('Turno terminato, reinserisci il codice.');
