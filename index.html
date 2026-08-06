@@ -111,6 +111,13 @@
     font-family:inherit;
   }
   .inline-input input.wide{width:220px;}
+  /* La modalità è una sigla (PC, SIMV, PS...) e nel testo generato va in maiuscolo comunque la
+     si scriva. Lo si fa vedere già sotto le dita, così il campo mostra quello che finirà nella
+     consegna invece di far scrivere una cosa e leggerne un'altra. Solo l'aspetto: il valore
+     resta come lo si è battuto, e a maiuscolarlo per davvero ci pensa già chi compone la frase.
+     Non si tocca il segnaposto, che è una frase e in maiuscolo urlerebbe. */
+  #modalita-val{text-transform:uppercase;}
+  #modalita-val::placeholder{text-transform:none;}
   /* Valore fuori dai limiti plausibili: si vede, non blocca. L'ambra e' la stessa della
      sezione 4 -- e' un "guarda qui", non un errore, e il rosso qui direbbe troppo. */
   .inline-input input.fuori-scala{border-color:var(--n4);background:#FFFCF2;}
