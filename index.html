@@ -669,8 +669,8 @@
       <div class="group-label">Emodinamica</div>
       <div class="flags">
         <span class="inline-group" data-group="C-stato" data-mode="radio">
-        <span class="flag" data-text="stabile" data-sub="C-catetere-arterioso">Stabile</span>
-        <span class="flag" data-text="instabile" data-sub="C-catetere-arterioso">Instabile</span>
+        <span class="flag" data-text="stabile" data-sub="C-catetere-arterioso C-pressione">Stabile</span>
+        <span class="flag" data-text="instabile" data-sub="C-catetere-arterioso C-pressione">Instabile</span>
         </span>
         <span class="inline-group" data-group="C-amine" data-mode="checkbox">
         <span class="flag" data-text="con ammine">Con ammine</span>
@@ -680,6 +680,19 @@
         <div class="sub-label">Catetere arterioso</div>
         <div class="sub-flags-inner">
         <span class="flag" data-text="presente">Presente</span>
+        </div>
+      </div>
+      <!-- Niente "normoteso": lo dice gia' "stabile", e un chip che ripete la scelta di sopra
+           si accende per abitudine. Qui si sceglie solo quando la pressione scosta. -->
+      <div class="sub-flags" id="C-pressione" data-group="C-pressione-sel" data-mode="radio">
+        <div class="sub-label">Pressione</div>
+        <div class="sub-flags-inner">
+        <span class="flag" data-text="iperteso">Iperteso</span>
+        <span class="flag" data-text="lievemente iperteso">Lievemente iperteso</span>
+        <span class="flag" data-text="tendente all'ipertensione">Tendente all'ipertensione</span>
+        <span class="flag" data-text="ipoteso">Ipoteso</span>
+        <span class="flag" data-text="lievemente ipoteso">Lievemente ipoteso</span>
+        <span class="flag" data-text="tendente all'ipotensione">Tendente all'ipotensione</span>
         </div>
       </div>
     </div>
@@ -797,6 +810,9 @@
       <span class="flag" data-text="ristagno alimentare">Alimentare</span>
       <span class="flag" data-text="ristagno biliare">Biliare</span>
       <span class="flag" data-text="ristagno ematico">Ematico</span>
+      <!-- "di aria" e non "aereo": la frase esce come "presenta ristagno di aria", e l'aggettivo
+           accanto agli altri tre suonerebbe piu' tecnico di come lo si dice a voce. -->
+      <span class="flag" data-text="ristagno di aria">Aria</span>
       <span class="inline-input">quantità <input type="text" inputmode="decimal" id="ristagno-qta-val" placeholder="ml"></span>
       </div>
     </div>
@@ -2031,7 +2047,13 @@ function render(){
     const prefix = hasArteria ? 'emodinamica' : 'pressione arteriosa';
     let stateTxt = `${prefix} ${cStatoWord}`;
     if(hasAmine) stateTxt += ', sostenuta da ammine';
-    cParts.push({ pieceKey: 'C-stato', text: mark(sourceMatches('C-stato', 'C-catetere-arterioso', 'C-amine'), stateTxt) });
+    // La pressione va in coda, dopo le ammine: "sostenuta" si riferisce all'emodinamica (o alla
+    // pressione arteriosa) e deve restarle accanto, mentre "iperteso" parla del paziente.
+    // Sta nella stessa frase e non in una sua: e' lo stesso fatto clinico detto piu' preciso,
+    // e spezzarlo darebbe due righe che si commentano a vicenda.
+    const cPressione = state['C-pressione-sel'] && state['C-pressione-sel'][0];
+    if(cPressione) stateTxt += ', ' + cPressione;
+    cParts.push({ pieceKey: 'C-stato', text: mark(sourceMatches('C-stato', 'C-catetere-arterioso', 'C-amine', 'C-pressione-sel'), stateTxt) });
   }
   // Senza Stabile/Instabile le ammine non scrivono niente. Prima uscivano da sole, "Sostenuta
   // da ammine.", con un participio femminile riferito a una pressione arteriosa che nella frase
