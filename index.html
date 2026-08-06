@@ -1108,12 +1108,23 @@ let soloLocale = false;
 
 // A quale domanda risponde il codice che si sta digitando. E' lo stesso codice in tutti i casi,
 // ma chi lo verifica no, e sbagliare interlocutore e' esattamente il guasto che c'e' stato:
-//   'attesa'   nessuna domanda ancora, si sta provando il server -- il campo resta chiuso
+//   'attesa'   non si sa ancora: si sta provando il server. Il codice si scrive comunque, e chi
+//              preme invio aspetta la decisione invece di parlare col posto sbagliato
 //   'supabase' accesso normale, lo verifica il server
 //   'offline'  apre l'archivio cifrato di questo computer (v. sbloccaOffline)
 //   'nuovo'    lo sta scegliendo adesso, senza rete e senza server (v. impostaCodiceLocale)
 //   'nessuno'  nessun codice servirebbe a niente -- il campo resta chiuso
 let modoAccesso = 'attesa';
+// Si risolve quando 'attesa' finisce, cioè quando si sa chi deve verificare il codice. Il codice
+// si può digitare subito, mentre la prova del server è ancora in corso: chi arriva al computer
+// sapendo il codice non deve stare a guardare un numero che scende. Se preme invio prima che la
+// prova sia finita non viene rimbalzato — la sua battuta aspetta qui e parte da sola.
+let segnalaDecisione = null;
+const decisioneAccesso = new Promise(ok => { segnalaDecisione = ok; });
+function decisoAccesso(modo){
+  modoAccesso = modo;
+  if(segnalaDecisione){ segnalaDecisione(); segnalaDecisione = null; }
+}
 // Il primo dei due inserimenti quando il codice si sta scegliendo.
 let codiceInAttesa = null;
 // Cresce a ogni tentativo verso Supabase: un esito che torna quando ne e' gia' partito un altro,
@@ -3726,13 +3737,12 @@ function bloccaContenuto(bloccato){
   if(contenutoApp) contenutoApp.inert = bloccato;
 }
 bloccaContenuto(true);
-// Il campo del codice nasce chiuso, e resta chiuso finché avvia() non ha deciso QUALE codice si
-// sta chiedendo. Prima era aperto da subito: chi digitava nei secondi in cui si
-// aspetta il server mandava il codice a Supabase — cioè al posto irraggiungibile — e la risposta
-// di quel tentativo, arrivando tardi, rimetteva davanti la schermata a chi nel frattempo era
-// entrato. È il motivo per cui esisteva 'modoAccesso' più in basso: qui si chiude la porta.
-campoCodice.disabled = true;
-btnAccesso.disabled = true;
+// Il codice si scrive da subito, prima che si sappia chi lo verificherà: il cursore è già lì.
+// Quello che NON si fa è mandarlo all'interlocutore sbagliato — è il guasto che c'era, il codice
+// spedito a Supabase mentre Supabase era irraggiungibile, con la risposta di quel tentativo che
+// tornava tardi e rimetteva davanti la schermata a chi nel frattempo era entrato. Ora la battuta
+// aspetta la decisione (v. decisioneAccesso) invece di partire verso il posto sbagliato.
+campoCodice.focus();
 
 function accessoScaduto(){
   let inizio = 0, grezzo = null;
@@ -3753,39 +3763,48 @@ function accessoScaduto(){
 // sono cinque secondi (v. SERVER_TIMEOUT_MS). Una schermata immobile per cinque secondi non
 // sembra un'attesa, sembra una pagina rotta: chi non sa cosa sta succedendo la chiude e rinuncia.
 // Il numero che scende dice due cose in una — che sta lavorando, e quanto manca al massimo.
-let attesaTimer = null, attesaRitardo = null;
+let attesaTimer = null, attesaRitardo = null, attesaIniziata = 0;
+
+// Fa comparire il conto adesso. Lo chiama il ritardo qui sotto, e lo chiama chi preme invio
+// prima che la prova sia finita: lì l'attesa va dichiarata subito, perché è appena diventata
+// un'attesa richiesta da qualcuno.
+function apriConto(){
+  if(attesaTimer || !attesaIniziata) return;
+  clearTimeout(attesaRitardo);
+  attesaRitardo = null;
+  // Via il role="alert" mentre scorre: con quello, uno screen reader leggerebbe il conto alla
+  // rovescia un numero alla volta, tutta. Torna al suo posto per il messaggio vero, che va
+  // annunciato.
+  msgAccesso.removeAttribute('role');
+  let ultimo = null;
+  const scrivi = () => {
+    // Il numero si ricava dal tempo passato per davvero, non da un contatore a scendere: così
+    // dice quanto manca anche se questo avviso è comparso in ritardo, o se il computer ha
+    // rallentato i timer perché la scheda era in secondo piano.
+    const restano = Math.ceil((SERVER_TIMEOUT_MS - (Date.now() - attesaIniziata)) / 1000);
+    if(restano === ultimo) return;
+    ultimo = restano;
+    msgAccesso.textContent = restano > 0
+      ? 'Controllo la connessione... ' + restano
+      : 'Controllo la connessione...';
+  };
+  scrivi();
+  attesaTimer = setInterval(scrivi, 250);
+}
 
 function mostraAttesaServer(){
-  const iniziato = Date.now();
+  attesaIniziata = Date.now();
   // Quando il server c'è la richiesta torna in meno di un secondo, e in quel caso non deve
-  // comparire e sparire niente: un avviso che lampeggia è peggio di nessun avviso. Si parla solo
-  // se l'attesa diventa una vera attesa.
-  attesaRitardo = setTimeout(() => {
-    // Via il role="alert" mentre scorre: con quello, uno screen reader leggerebbe il conto alla
-    // rovescia un numero alla volta, tutta. Torna al suo posto per il messaggio vero, che va
-    // annunciato.
-    msgAccesso.removeAttribute('role');
-    let ultimo = null;
-    const scrivi = () => {
-      // Il numero si ricava dal tempo passato per davvero, non da un contatore a scendere:
-      // così dice quanto manca anche se questo avviso è comparso in ritardo, o se il computer ha
-      // rallentato i timer perché la scheda era in secondo piano.
-      const restano = Math.ceil((SERVER_TIMEOUT_MS - (Date.now() - iniziato)) / 1000);
-      if(restano === ultimo) return;
-      ultimo = restano;
-      msgAccesso.textContent = restano > 0
-        ? 'Controllo la connessione... ' + restano
-        : 'Controllo la connessione...';
-    };
-    scrivi();
-    attesaTimer = setInterval(scrivi, 250);
-  }, 1200);
+  // comparire e sparire niente: un avviso che lampeggia è peggio di nessun avviso. Da sé si parla
+  // solo se l'attesa diventa una vera attesa.
+  attesaRitardo = setTimeout(apriConto, 1200);
 }
 
 function fineAttesaServer(){
   clearTimeout(attesaRitardo);
   clearInterval(attesaTimer);
   attesaRitardo = attesaTimer = null;
+  attesaIniziata = 0;
   msgAccesso.textContent = '';
   msgAccesso.setAttribute('role', 'alert');
 }
@@ -3796,10 +3815,9 @@ function mostraAccesso(messaggio){
   boxAccesso.classList.remove('nascosto');
   msgAccesso.textContent = messaggio || '';
   campoCodice.value = '';
-  // Si può rispondere solo a una domanda che è già stata scelta. 'attesa' e 'nessuno' non sono
-  // domande: nella prima non si sa ancora se il server c'è, nella seconda non c'è nessun codice
-  // che possa servire a qualcosa.
-  const chiedibile = modoAccesso === 'supabase' || modoAccesso === 'offline' || modoAccesso === 'nuovo';
+  // Il codice si scrive sempre, tranne quando non c'è nessun codice che possa servire a qualcosa.
+  // Anche in 'attesa': lì la battuta viene messa in coda, non buttata (v. entra).
+  const chiedibile = modoAccesso !== 'nessuno';
   campoCodice.disabled = !chiedibile;
   btnAccesso.disabled = !chiedibile;
   if(chiedibile) campoCodice.focus();
@@ -3846,7 +3864,7 @@ async function esci(messaggio, pulisci){
   if(sb){ try { await sb.auth.signOut(); } catch(e){} }
   document.getElementById('saved-list').innerHTML = '<p class="saved-empty">Caricamento...</p>';
   // Da qui si esce solo quando il server c'è: la domanda torna a essere quella normale.
-  modoAccesso = 'supabase';
+  decisoAccesso('supabase');
   mostraAccesso(messaggio);
 }
 
@@ -3877,7 +3895,9 @@ async function sbloccaOffline(codice){
 async function impostaCodiceLocale(codice){
   if(codiceInAttesa === null){
     codiceInAttesa = codice;
-    mostraAccesso('Ripeti lo stesso codice per confermarlo.');
+    // Si spiega da sé: chi ha digitato durante la prova del server non ha visto la schermata che
+    // dice che questo computer si sta impostando adesso, e "ripeti il codice" da solo non lo dice.
+    mostraAccesso('Primo avvio senza rete: ripeti il codice per confermarlo.');
     return;
   }
   const primo = codiceInAttesa;
@@ -3895,7 +3915,7 @@ async function impostaCodiceLocale(codice){
     return;
   }
   sbloccatoIl = Date.now();
-  modoAccesso = 'offline';
+  decisoAccesso('offline');
   msgAccesso.textContent = '';
   apriLocale(MSG_OFFLINE);
 }
@@ -3903,6 +3923,19 @@ async function impostaCodiceLocale(codice){
 async function entra(){
   const codice = campoCodice.value.trim();
   if(!codice) return;
+  if(modoAccesso === 'attesa'){
+    // Il codice è già scritto e non si perde: si tiene qui, spegnendo il tasto, e si aspettano
+    // solo i secondi che restano. Il conto compare adesso anche se non era ancora comparso da sé:
+    // chi ha premuto invio ha diritto di sapere che si sta aspettando, e quanto.
+    apriConto();
+    btnAccesso.disabled = true;
+    await decisioneAccesso;
+    btnAccesso.disabled = false;
+    // La prova può essere finita con una sessione ancora valida, che apre la pagina da sola: in
+    // quel caso questo codice non serve più a niente e sparisce senza dire nulla.
+    if(appAperta) return;
+    msgAccesso.textContent = '';
+  }
   if(modoAccesso === 'nuovo'){ await impostaCodiceLocale(codice); return; }
   if(modoAccesso === 'offline'){ await sbloccaOffline(codice); return; }
   if(modoAccesso !== 'supabase' || !sb) return;
@@ -3975,7 +4008,7 @@ const SBLOCCO_LOCALE_MS = 4 * 60 * 60 * 1000;
 function bloccaOffline(messaggio){
   chiaveDati = null;
   sbloccatoIl = 0;
-  modoAccesso = 'offline';
+  decisoAccesso('offline');
   // Come a fine turno online: la bozza muore, e la cronologia dell'annulla non deve poter
   // riportare in pagina la consegna di chi c'era prima. Quello che è rimasto scritto resta,
   // coperto dalla schermata del codice.
@@ -4010,7 +4043,7 @@ async function avvia(){
     // offrire la sola generazione locale senza esporre dati. Qui il tasto resta, e non si
     // entra da soli: succede anche dall'indirizzo online, dove una pagina che si apre da sé
     // sembrerebbe un guasto silenzioso invece di uno script che non è arrivato.
-    modoAccesso = 'nessuno';
+    decisoAccesso('nessuno');
     msgAccesso.textContent = 'Archivio non raggiungibile: si può solo scrivere una consegna nuova.';
     document.getElementById('accesso-locale').hidden = false;
     return;
@@ -4041,15 +4074,15 @@ async function avvia(){
     if(!crypto.subtle){
       // Nessuna cifratura possibile: un codice qui sarebbe una porta finta davanti a dati in
       // chiaro, e chiederlo direbbe una cosa non vera.
-      modoAccesso = 'nessuno';
+      decisoAccesso('nessuno');
       apriLocale('Server non raggiungibile: si può scrivere e copiare, ma questo browser non permette di tenere un archivio su questo computer.');
       return;
     }
     if(chiaveArmata()){
-      modoAccesso = 'offline';
+      decisoAccesso('offline');
       mostraAccesso('Server non raggiungibile: inserisci il codice per aprire l\'archivio offline.');
     } else {
-      modoAccesso = 'nuovo';
+      decisoAccesso('nuovo');
       mostraAccesso('Primo avvio senza rete su questo computer: scegli il codice che aprirà l\'archivio. Usa il codice di reparto.');
     }
     return;
@@ -4067,9 +4100,16 @@ async function avvia(){
   // senza rete resterebbero invisibili proprio quando la rete torna, cioè quando servono per
   // essere portate in archivio.
   const daRiaprire = MODO_LOCALE && chiaveArmata() && archivioLocalePresente() && !chiaveDati;
-  if(sessione && !accessoScaduto() && !daRiaprire){ apriApp(); return; }
+  if(sessione && !accessoScaduto() && !daRiaprire){
+    // La pagina si apre da sé, ma la decisione va comunicata comunque: se qualcuno ha digitato il
+    // codice mentre si aspettava, la sua battuta è appesa a questa promessa e resterebbe appesa
+    // per sempre. Ad accorgersi che non serve più ci pensa entra(), che vede la pagina già aperta.
+    decisoAccesso('supabase');
+    apriApp();
+    return;
+  }
   // Da qui in poi il server c'è e a verificare il codice torna lui, in tutti i casi.
-  modoAccesso = 'supabase';
+  decisoAccesso('supabase');
   if(sessione && daRiaprire){
     mostraAccesso('Ci sono consegne salvate offline su questo computer: inserisci il codice per riaprirle.');
     return;
@@ -4114,7 +4154,18 @@ document.getElementById('accesso-locale').addEventListener('click', () => {
   apriLocale('Archivio non raggiungibile: si può scrivere e copiare, ma non salvare.');
 });
 
-avvia();
+// Qualunque cosa vada storta durante l'avvio, chi ha già digitato il codice non deve restare
+// appeso a una promessa che nessuno mantiene: meglio una schermata che risponde male che una
+// schermata che non risponde.
+avvia()
+  .catch(e => console.error('Avvio non riuscito:', e))
+  .finally(() => {
+    if(modoAccesso === 'attesa'){
+      fineAttesaServer();
+      decisoAccesso(sb ? 'supabase' : 'nessuno');
+      mostraAccesso('');
+    }
+  });
 </script>
 
 </body>
