@@ -3743,6 +3743,46 @@ function accessoScaduto(){
   return adesso() - inizio > durata;
 }
 
+// Il campo resta chiuso finché non si sa chi deve verificare il codice, e su una rete che filtra
+// sono otto secondi. Otto secondi di schermata immobile non sembrano un'attesa, sembrano una
+// pagina rotta: chi non sa cosa sta succedendo la chiude e rinuncia. Il numero che scende dice
+// due cose in una — che sta lavorando, e quanto manca al massimo.
+let attesaTimer = null, attesaRitardo = null;
+
+function mostraAttesaServer(){
+  const iniziato = Date.now();
+  // Quando il server c'è la richiesta torna in meno di un secondo, e in quel caso non deve
+  // comparire e sparire niente: un avviso che lampeggia è peggio di nessun avviso. Si parla solo
+  // se l'attesa diventa una vera attesa.
+  attesaRitardo = setTimeout(() => {
+    // Via il role="alert" mentre scorre: con quello, uno screen reader leggerebbe il conto alla
+    // rovescia otto volte di fila. Torna al suo posto per il messaggio vero, che va annunciato.
+    msgAccesso.removeAttribute('role');
+    let ultimo = null;
+    const scrivi = () => {
+      // Il numero si ricava dal tempo passato per davvero, non da un contatore che parte da otto:
+      // così dice quanto manca anche se questo avviso è comparso in ritardo, o se il computer ha
+      // rallentato i timer perché la scheda era in secondo piano.
+      const restano = Math.ceil((SERVER_TIMEOUT_MS - (Date.now() - iniziato)) / 1000);
+      if(restano === ultimo) return;
+      ultimo = restano;
+      msgAccesso.textContent = restano > 0
+        ? 'Controllo la connessione... ' + restano
+        : 'Controllo la connessione...';
+    };
+    scrivi();
+    attesaTimer = setInterval(scrivi, 250);
+  }, 1200);
+}
+
+function fineAttesaServer(){
+  clearTimeout(attesaRitardo);
+  clearInterval(attesaTimer);
+  attesaRitardo = attesaTimer = null;
+  msgAccesso.textContent = '';
+  msgAccesso.setAttribute('role', 'alert');
+}
+
 function mostraAccesso(messaggio){
   appAperta = false;
   bloccaContenuto(true);
@@ -3972,7 +4012,9 @@ async function avvia(){
   // farlo sull'orologio del dispositivo è esattamente ciò che adesso() esiste per evitare.
   // Se il server non risponde si prosegue lo stesso, con lo scarto a zero: restare fuori per
   // un orologio muto sarebbe peggio.
+  mostraAttesaServer();
   const serverRisponde = await allineaOrologio();
+  fineAttesaServer();
   // Questa richiesta è anche l'unica prova onesta che il server ci sia: navigator.onLine dice
   // di sì pure attaccati alla rete dell'ospedale che filtra quel dominio, cioè proprio il caso
   // per cui la copia sul disco esiste.
