@@ -4185,6 +4185,20 @@ async function avvia(){
     if(appAperta && accessoScaduto()) esci('Turno terminato, reinserisci il codice.', false);
     return;
   }
+  // Anche offline ricaricare non è cambiare turno, e non deve costare l'attesa: se QUESTA scheda
+  // aveva già aperto l'archivio di questo computer, si rientra subito, senza richiedere il server.
+  // Prima il controllo stava dopo la prova, e la ricarica se li prendeva tutti e tre i secondi.
+  //
+  // Chiedere il server prima servirebbe a scoprire che nel frattempo è tornato raggiungibile, e
+  // allora l'archivio vero. Ma sessionStorage dura quanto la scheda: se lì c'è uno sblocco, il
+  // server è stato trovato assente pochi minuti fa, da questa stessa scheda, e in mezzo non è
+  // cambiata la rete dell'ospedale. Quando cambia davvero il file lo si riapre — scheda nuova,
+  // sessionStorage vuoto, prova completa — e l'archivio vero si ritrova da sé.
+  if(MODO_LOCALE && crypto.subtle && chiaveArmata() && await riprendiSblocco()){
+    decisoAccesso('offline');
+    apriLocale(MSG_OFFLINE);
+    return;
+  }
   // Niente turno aperto: la schermata del codice si mostra adesso, non dopo la prova del server.
   // È lì che si digita mentre si aspetta (v. decisioneAccesso), e aspettare per mostrarla
   // vorrebbe dire togliere di nuovo quei secondi a chi il codice lo sa a memoria.
@@ -4216,14 +4230,6 @@ async function avvia(){
       // chiaro, e chiederlo direbbe una cosa non vera.
       decisoAccesso('nessuno');
       apriLocale('Server non raggiungibile: si può scrivere e copiare, ma questo browser non permette di tenere un archivio su questo computer.');
-      return;
-    }
-    // Ricaricare non è cambiare turno: se questa scheda aveva già aperto l'archivio, si rientra
-    // senza ridigitare niente. Le quattro ore le controlla riprendiSblocco, e contano da quando
-    // è stato aperto la prima volta.
-    if(chiaveArmata() && await riprendiSblocco()){
-      decisoAccesso('offline');
-      apriLocale(MSG_OFFLINE);
       return;
     }
     if(chiaveArmata()){
