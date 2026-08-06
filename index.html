@@ -693,9 +693,9 @@
         <div class="sub-label">Pressione</div>
         <div class="sub-flags-inner">
         <span class="flag" data-text="tendente all'ipertensione">Iperteso</span>
-        <span class="flag" data-text="lievemente iperteso">Lieve ipertensione</span>
+        <span class="flag" data-text="paziente lievemente iperteso">Lieve ipertensione</span>
         <span class="flag" data-text="tendente all'ipotensione">Ipoteso</span>
-        <span class="flag" data-text="lievemente ipoteso">Lieve ipotensione</span>
+        <span class="flag" data-text="paziente lievemente ipoteso">Lieve ipotensione</span>
         </div>
       </div>
     </div>
@@ -2179,6 +2179,8 @@ function render(){
     if(ristagni.length){
       const materiali = ristagni.filter(t => t !== RISTAGNO_ARIA);
       const conAria = ristagni.includes(RISTAGNO_ARIA);
+      const ristagnoQta = document.getElementById('ristagno-qta-val').value;
+      const qtySuffix = ristagnoQta ? ` (${ristagnoQta} ml)` : '';
       // L'aria è sempre abbondante, per come viene segnalata: se non è abbondante non la si
       // scrive nemmeno, quindi l'aggettivo non è una scelta da lasciare a un chip in più.
       let ristagnoTxt;
@@ -2188,15 +2190,21 @@ function render(){
         // "alimentare e biliare e abbondante aria" — perché entrambe le liste ci mettevano il
         // loro. Qui l'aria è una voce come le altre, e la congiunzione la mette solo l'ultima.
         const voci = materiali.map(t => t.replace('ristagno ', ''));
+        // I millilitri sono quelli del liquido drenato, non dell'aria: chiudono l'ultimo
+        // materiale e restano dentro la frase, prima dell'aria. In coda a tutto sembrerebbero
+        // misurare l'aria, che è l'unica cosa che lì non si misura.
+        voci[voci.length - 1] += qtySuffix;
         if(conAria) voci.push('abbondante aria');
         ristagnoTxt = 'ristagno ' + joinItalian(voci);
       } else {
-        // Da sola l'aria tiene il suo "ristagno": è lì che dice di che cosa si sta parlando.
-        ristagnoTxt = 'abbondante ristagno di aria';
+        // Da sola l'aria non è un "ristagno" da elencare accanto agli altri: è una cosa che si
+        // dice per intero, dove sta e com'è. Gli ml qui sono rari ma possibili, e allora sono
+        // suoi: non c'è nient'altro a cui possano riferirsi.
+        ristagnoTxt = 'abbondante aria nello stomaco' + qtySuffix;
       }
-      const ristagnoQta = document.getElementById('ristagno-qta-val').value;
-      const qtySuffix = ristagnoQta ? ` (${ristagnoQta} ml)` : '';
-      uParts.push({ pieceKey: 'U-ristagno', text: mark(sourceMatches('U-ristagno-sel', 'ristagno-qta-val'), 'presenta ' + ristagnoTxt + qtySuffix) });
+      // Niente qtySuffix qui: i millilitri li ha già messi dentro la frase chi l'ha composta,
+      // accanto a quello che misurano.
+      uParts.push({ pieceKey: 'U-ristagno', text: mark(sourceMatches('U-ristagno-sel', 'ristagno-qta-val'), 'presenta ' + ristagnoTxt) });
     }
   }
 
