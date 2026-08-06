@@ -3161,7 +3161,13 @@ const CONSERVAZIONE_MS = 16 * 24 * 60 * 60 * 1000;
 // subito, ma una rete che ingoia i pacchetti senza rispondere — il filtro dell'ospedale —
 // terrebbe la richiesta appesa per minuti. Questa attesa è diventata la porta d'ingresso della
 // copia locale: senza un limite, chi apre il file offline resterebbe fermo davanti al codice.
-const SERVER_TIMEOUT_MS = 8000;
+//
+// Cinque secondi. Il margine e' abbondante: quando il server c'e', misurato, risponde in circa
+// 700 ms. Alzarli non serviva a niente e si pagava a ogni apertura; abbassarli ancora rischia di
+// dichiarare assente un server soltanto lento, e finire nell'archivio offline quando quello vero
+// era raggiungibile — che e' l'errore piu' caro dei due, perche' la consegna finisce su un solo
+// computer invece che in archivio.
+const SERVER_TIMEOUT_MS = 5000;
 
 // L'ora la si chiede al server, mai al dispositivo. Se l'orologio di un computer del reparto
 // fosse avanti di un mese — succede, dopo un cambio di scheda madre o una batteria scarica —
@@ -3721,7 +3727,7 @@ function bloccaContenuto(bloccato){
 }
 bloccaContenuto(true);
 // Il campo del codice nasce chiuso, e resta chiuso finché avvia() non ha deciso QUALE codice si
-// sta chiedendo. Prima era aperto da subito: chi digitava durante gli otto secondi in cui si
+// sta chiedendo. Prima era aperto da subito: chi digitava nei secondi in cui si
 // aspetta il server mandava il codice a Supabase — cioè al posto irraggiungibile — e la risposta
 // di quel tentativo, arrivando tardi, rimetteva davanti la schermata a chi nel frattempo era
 // entrato. È il motivo per cui esisteva 'modoAccesso' più in basso: qui si chiude la porta.
@@ -3744,9 +3750,9 @@ function accessoScaduto(){
 }
 
 // Il campo resta chiuso finché non si sa chi deve verificare il codice, e su una rete che filtra
-// sono otto secondi. Otto secondi di schermata immobile non sembrano un'attesa, sembrano una
-// pagina rotta: chi non sa cosa sta succedendo la chiude e rinuncia. Il numero che scende dice
-// due cose in una — che sta lavorando, e quanto manca al massimo.
+// sono cinque secondi (v. SERVER_TIMEOUT_MS). Una schermata immobile per cinque secondi non
+// sembra un'attesa, sembra una pagina rotta: chi non sa cosa sta succedendo la chiude e rinuncia.
+// Il numero che scende dice due cose in una — che sta lavorando, e quanto manca al massimo.
 let attesaTimer = null, attesaRitardo = null;
 
 function mostraAttesaServer(){
@@ -3756,11 +3762,12 @@ function mostraAttesaServer(){
   // se l'attesa diventa una vera attesa.
   attesaRitardo = setTimeout(() => {
     // Via il role="alert" mentre scorre: con quello, uno screen reader leggerebbe il conto alla
-    // rovescia otto volte di fila. Torna al suo posto per il messaggio vero, che va annunciato.
+    // rovescia un numero alla volta, tutta. Torna al suo posto per il messaggio vero, che va
+    // annunciato.
     msgAccesso.removeAttribute('role');
     let ultimo = null;
     const scrivi = () => {
-      // Il numero si ricava dal tempo passato per davvero, non da un contatore che parte da otto:
+      // Il numero si ricava dal tempo passato per davvero, non da un contatore a scendere:
       // così dice quanto manca anche se questo avviso è comparso in ritardo, o se il computer ha
       // rallentato i timer perché la scheda era in secondo piano.
       const restano = Math.ceil((SERVER_TIMEOUT_MS - (Date.now() - iniziato)) / 1000);
@@ -3922,7 +3929,7 @@ async function entra(){
     }
   }
 
-  // Su una rete che filtra, questa richiesta può metterci molto più degli otto secondi entro cui
+  // Su una rete che filtra, questa richiesta può metterci molto più dei cinque secondi entro cui
   // avvia() decide che il server non c'è. Nel frattempo la pagina può essere passata all'archivio
   // offline, e chi ci era entrato non deve vedersi rimettere davanti la schermata da un tentativo
   // di cui non sa più niente. Un esito vecchio si butta, in silenzio.
