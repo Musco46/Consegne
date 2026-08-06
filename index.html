@@ -4109,10 +4109,33 @@ async function avvia(){
     document.getElementById('accesso-locale').hidden = false;
     return;
   }
-  // Prima di qualunque scadenza, l'ora giusta: qui sotto si decide se il turno è finito, e
-  // farlo sull'orologio del dispositivo è esattamente ciò che adesso() esiste per evitare.
-  // Se il server non risponde si prosegue lo stesso, con lo scarto a zero: restare fuori per
-  // un orologio muto sarebbe peggio.
+  // Chi ha il turno ancora aperto rientra subito, senza chiedere niente a nessuno. La prova sta
+  // già sul dispositivo — quando si è entrati e per quanto vale (v. accessoScaduto) — e prima
+  // veniva letta DOPO la richiesta dell'ora al server: era quella richiesta, non il controllo,
+  // a tenere la schermata del codice davanti a chi era già dentro per un secondo o due.
+  //
+  // Vale solo dall'indirizzo online, e non e' una scorciatoia: se la pagina e' arrivata dal sito
+  // la rete c'era un istante prima, mentre la copia sul disco si apre anche senza rete ed e'
+  // proprio la prova del server a dover decidere tutto (archivio vero o archivio cifrato locale).
+  //
+  // Che la sessione sul server sia ancora buona non lo si verifica qui: se non lo fosse — codice
+  // cambiato, token non piu' rinnovabile — se ne accorge onAuthStateChange qui sopra e fa uscire,
+  // che e' il mestiere che ha gia'. Meglio far entrare e correggersi che tenere fuori tutti.
+  if(!MODO_LOCALE && !accessoScaduto()){
+    decisoAccesso('supabase');
+    await apriApp();
+    // Adesso l'ora e' quella del server: apriApp ci passa da eliminaConsegneVecchie. Se il turno
+    // era finito e l'orologio di questo computer diceva il contrario, si esce ora.
+    if(appAperta && accessoScaduto()) esci('Turno terminato, reinserisci il codice.', false);
+    return;
+  }
+  // Niente turno aperto: la schermata del codice si mostra adesso, non dopo la prova del server.
+  // È lì che si digita mentre si aspetta (v. decisioneAccesso), e aspettare per mostrarla
+  // vorrebbe dire togliere di nuovo quei secondi a chi il codice lo sa a memoria.
+  mostraAccesso('');
+  // L'ora giusta serve a tutte le scadenze qui sotto, e prenderla dall'orologio del dispositivo
+  // è esattamente ciò che adesso() esiste per evitare. Se il server non risponde si prosegue
+  // lo stesso, con lo scarto a zero: restare fuori per un orologio muto sarebbe peggio.
   mostraAttesaServer();
   const serverRisponde = await allineaOrologio();
   fineAttesaServer();
@@ -4177,7 +4200,8 @@ async function avvia(){
     mostraAccesso('Turno terminato, reinserisci il codice.');
     return;
   }
-  mostraAccesso('');
+  // Qui non si rimostra niente: la schermata è già davanti da prima della prova del server, e
+  // richiamarla svuoterebbe il campo a chi ha passato quei secondi a digitare il codice.
 }
 
 // Si apre la pagina senza essere entrati da nessuna parte.
