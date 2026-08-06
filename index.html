@@ -3240,12 +3240,12 @@ const CONSERVAZIONE_MS = 16 * 24 * 60 * 60 * 1000;
 // terrebbe la richiesta appesa per minuti. Questa attesa è diventata la porta d'ingresso della
 // copia locale: senza un limite, chi apre il file offline resterebbe fermo davanti al codice.
 //
-// Cinque secondi. Il margine e' abbondante: quando il server c'e', misurato, risponde in circa
-// 700 ms. Alzarli non serviva a niente e si pagava a ogni apertura; abbassarli ancora rischia di
-// dichiarare assente un server soltanto lento, e finire nell'archivio offline quando quello vero
-// era raggiungibile — che e' l'errore piu' caro dei due, perche' la consegna finisce su un solo
-// computer invece che in archivio.
-const SERVER_TIMEOUT_MS = 5000;
+// Tre secondi: quattro volte il tempo che il server ci mette quando c'e' (misurato, circa 700 ms
+// da qui). Il margine resta, ma da qui in giu' non si scende. L'errore che si rischia abbassando
+// non e' simmetrico: dichiarare assente un server soltanto lento mette la consegna sull'archivio
+// di un solo computer invece che in quello vero, dove la vedono gli altri. Aspettare un secondo
+// di troppo costa un secondo; non aspettarlo costa una consegna che nessun altro trova.
+const SERVER_TIMEOUT_MS = 3000;
 
 // L'ora la si chiede al server, mai al dispositivo. Se l'orologio di un computer del reparto
 // fosse avanti di un mese — succede, dopo un cambio di scheda madre o una batteria scarica —
@@ -3872,10 +3872,11 @@ function accessoScaduto(){
   return adesso() - inizio > durata;
 }
 
-// Il campo resta chiuso finché non si sa chi deve verificare il codice, e su una rete che filtra
-// sono cinque secondi (v. SERVER_TIMEOUT_MS). Una schermata immobile per cinque secondi non
-// sembra un'attesa, sembra una pagina rotta: chi non sa cosa sta succedendo la chiude e rinuncia.
-// Il numero che scende dice due cose in una — che sta lavorando, e quanto manca al massimo.
+// Il codice si può digitare da subito, ma finché non si sa chi deve verificarlo la pagina non va
+// avanti, e su una rete che filtra è l'attesa piena (v. SERVER_TIMEOUT_MS). Una schermata immobile
+// per qualche secondo non sembra un'attesa, sembra una pagina rotta: chi non sa cosa sta
+// succedendo la chiude e rinuncia. Il numero che scende dice due cose in una — che sta lavorando,
+// e quanto manca al massimo.
 let attesaTimer = null, attesaRitardo = null, attesaIniziata = 0;
 
 // Fa comparire il conto adesso. Lo chiama il ritardo qui sotto, e lo chiama chi preme invio
@@ -4076,7 +4077,7 @@ async function entra(){
     }
   }
 
-  // Su una rete che filtra, questa richiesta può metterci molto più dei cinque secondi entro cui
+  // Su una rete che filtra, questa richiesta può metterci molto più dei tre secondi entro cui
   // avvia() decide che il server non c'è. Nel frattempo la pagina può essere passata all'archivio
   // offline, e chi ci era entrato non deve vedersi rimettere davanti la schermata da un tentativo
   // di cui non sa più niente. Un esito vecchio si butta, in silenzio.
